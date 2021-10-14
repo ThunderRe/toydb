@@ -97,6 +97,5 @@ fn test_hybrid_storage() -> Result<()> {
         end_index = engine.append(vec)?;
         engine.commit(end_index)?;
     }
-    println!("{}", end_index);
     Ok(())
 }
