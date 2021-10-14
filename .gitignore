@@ -2,3 +2,4 @@
 /target
 .vscode/
 **/*.rs.bk
+/storage_temp
