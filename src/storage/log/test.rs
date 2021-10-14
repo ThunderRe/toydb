@@ -83,7 +83,7 @@ fn tests() -> Result<()> {
 
 #[test]
 fn test_hybrid_storage() -> Result<()> {
-    let path_str = "D:\\DataSave\\toydb";
+    let path_str = "storage_temp";
     let path = Path::new(path_str);
     let mut engine = Hybrid::new(path, true)?;
     let mut end_index = 0;
