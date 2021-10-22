@@ -1,7 +1,7 @@
 use crate::error::Result;
 
-/// ClockReplacer 实现了时钟替换策略，它近似于最近最少使用的策略
-pub trait ClockReplacer {
+/// Replacer 实现了时钟替换策略，它近似于最近最少使用的策略
+pub trait Replacer {
     /// 从时钟指针的当前位置开始，找到在`ClockReplacer` 中并且其ref 标志设置为false 的第一帧。
     /// 如果一个帧在 `ClockReplacer` 中，但它的 ref 标志设置为 true，请将其更改为 false。
     /// 这应该是更新时钟指针的唯一方法。
@@ -17,4 +17,30 @@ pub trait ClockReplacer {
 
     /// 此方法返回当前在 ClockReplacer 中的帧数。
     fn size(&mut self) -> Result<u64>;
+}
+
+struct ClockReplacer {}
+
+impl ClockReplacer {
+    pub fn new(size: u32) -> Result<ClockReplacer> {
+        todo!()
+    }
+}
+
+impl Replacer for ClockReplacer {
+    fn victim(&mut self, frame_id: u32) -> Result<bool> {
+        todo!()
+    }
+
+    fn pin(&mut self, frame_id: &u32) -> Result<()> {
+        todo!()
+    }
+
+    fn un_pin(&mut self, frame_id: &u32) -> Result<()> {
+        todo!()
+    }
+
+    fn size(&mut self) -> Result<u64> {
+        todo!()
+    }
 }
