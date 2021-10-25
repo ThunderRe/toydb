@@ -41,11 +41,6 @@ impl ClockReplacer {
         Ok(ClockReplacer { queue: Vec::new(), map: HashMap::new(), size: size as usize })
     }
 
-    pub fn println_all(&mut self) {
-        println!("{:?}", self.map);
-        println!("{:?}", self.queue);
-    }
-
     /// 进行一次扫描
     fn scan(&mut self) {
         for frame in self.queue.iter_mut() {
