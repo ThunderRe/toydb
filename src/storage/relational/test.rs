@@ -1,5 +1,6 @@
+use std::path::Path;
 use super::clock_replacer::ClockReplacer;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::storage::relational::clock_replacer::Replacer;
 
 #[derive(Clone, Debug)]
@@ -20,5 +21,14 @@ fn check_replacer_test() -> Result<()> {
         }
     }
     assert_eq!(clock_replacer.size(), 3);
+    Ok(())
+}
+
+#[test]
+fn check_file_path() -> Result<()> {
+    let path = Path::new("D:\\aaa");
+    let path_buf = path.join(Path::new("x.txt"));
+    let new_path = path_buf.as_path();
+    println!("{:?}", new_path);
     Ok(())
 }

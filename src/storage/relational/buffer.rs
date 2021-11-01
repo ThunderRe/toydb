@@ -1,6 +1,6 @@
-use crate::error::{Error, Result};
+use crate::error::Result;
 
-use super::page::{Page, ToyPage};
+use super::page::ToyPage;
 
 ///
 pub trait BufferPoolManager {
