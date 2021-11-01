@@ -2,7 +2,7 @@ use crate::error::Result;
 use std::fs::{File, create_dir_all, OpenOptions};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use tokio::task::JoinHandle;
 
 struct DiskManager {
     // write to log file
@@ -45,5 +45,13 @@ impl DiskManager {
         };
 
         Ok(dish_manager)
+    }
+
+}
+
+impl Drop for DiskManager {
+    fn drop(&mut self) {
+        self.db_file.lock().unwrap().sync_all().ok();
+        self.log_file.lock().unwrap().sync_all().ok();
     }
 }
