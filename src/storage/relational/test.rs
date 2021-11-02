@@ -1,7 +1,7 @@
-use std::path::Path;
 use super::clock_replacer::ClockReplacer;
 use crate::error::{Error, Result};
 use crate::storage::relational::clock_replacer::Replacer;
+use std::path::Path;
 
 #[derive(Clone, Debug)]
 struct FrameTest {
