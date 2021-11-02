@@ -9,6 +9,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Abort,
     Config(String),
+    Past(String),
     Internal(String),
     Parse(String),
     ReadOnly,
@@ -21,7 +22,11 @@ impl std::error::Error for Error {}
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Config(s) | Error::Internal(s) | Error::Parse(s) | Error::Value(s) => {
+            Error::Config(s)
+            | Error::Internal(s)
+            | Error::Parse(s)
+            | Error::Value(s)
+            | Error::Past(s) => {
                 write!(f, "{}", s)
             }
             Error::Abort => write!(f, "Operation aborted"),

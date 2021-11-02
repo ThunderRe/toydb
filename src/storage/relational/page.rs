@@ -1,8 +1,7 @@
-use crate::error::{Error, Result};
-use tokio::sync::RwLock;
+use crate::error::Result;
 
 /// 每个Page的固定大小：4KB
-const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 
 pub trait Page {
     /// 返回包含在此页面中的实际数据
@@ -37,7 +36,7 @@ pub trait Page {
 }
 
 pub struct ToyPage {
-    data: [u8; PAGE_SIZE],
+    data: Box<[u8; PAGE_SIZE]>,
     page_id: i32,
     pin_count: u32,
     is_dirty: bool,
@@ -46,7 +45,7 @@ pub struct ToyPage {
 impl ToyPage {
     pub fn new() -> Result<ToyPage> {
         let data = [0 as u8; PAGE_SIZE];
-        let page = ToyPage { data, page_id: -1, pin_count: 0, is_dirty: false };
+        let page = ToyPage { data: Box::new(data), page_id: -1, pin_count: 0, is_dirty: false };
         Ok(page)
     }
 }

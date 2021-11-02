@@ -1,6 +1,5 @@
 use crate::error::Result;
 use std::collections::HashMap;
-use std::fs::remove_dir;
 use std::option::Option::Some;
 
 /// Replacer 实现了时钟替换策略，它近似于最近最少使用的策略
@@ -80,12 +79,12 @@ impl ClockReplacer {
         Ok(())
     }
 
-    fn find(&mut self, page_id: &u32) -> Option<&Frame> {
-        if let Some(queue_index) = self.map.get(page_id) {
-            return self.queue.get(*queue_index);
-        }
-        None
-    }
+    // fn find(&mut self, page_id: &u32) -> Option<&Frame> {
+    //     if let Some(queue_index) = self.map.get(page_id) {
+    //         return self.queue.get(*queue_index);
+    //     }
+    //     None
+    // }
 
     fn find_mut(&mut self, page_id: &u32) -> Option<&mut Frame> {
         if let Some(queue_index) = self.map.get(page_id) {
@@ -125,7 +124,7 @@ impl Replacer for ClockReplacer {
         }
 
         if self.size() < self.size {
-            self.add(frame_id);
+            self.add(frame_id)?;
         }
         Ok(false)
     }
