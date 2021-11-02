@@ -1,7 +1,7 @@
 use crate::error::Result;
 
 /// 每个Page的固定大小：4KB
-const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 
 pub trait Page {
     /// 返回包含在此页面中的实际数据

@@ -9,6 +9,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Abort,
     Config(String),
+    Past(String),
     Internal(String),
     Parse(String),
     ReadOnly,
