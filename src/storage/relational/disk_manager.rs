@@ -1,9 +1,9 @@
-use super::page::PAGE_SIZE;
 use crate::error::{Error, Result};
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use crate::storage::relational::page::PAGE_SIZE;
 
 pub struct DiskManager {
     // write to log file
