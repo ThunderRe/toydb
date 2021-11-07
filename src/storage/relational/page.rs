@@ -323,26 +323,26 @@ impl TablePage {
     /// return tuple offset at slot slot_num
     fn get_tuple_offset_at_slot(&self, slot_num: u32) -> Result<u32> {
         let data = self.get_data()?;
-        vec_to_u32(&data, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num)
+        vec_to_u32(&data, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize)
     }
 
     /// set tuple offset at slot slot_num
     fn set_tuple_offset_at_slot(&mut self, slot_num: u32, offset: u32) -> Result<()> {
         let data = u32_to_vec(offset)?;
-        self.set_data(slot_data, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num, 4)
+        self.set_data(data, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize, 4)
     }
 
     /// return tuple size at slot slot_num
     fn get_tuple_size(&self, slot_num: u32) -> Result<usize> {
         let data = self.get_data()?;
-        let size = vec_to_u32(&data, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num)?;
+        let size = vec_to_u32(&data, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize)?;
         Ok(size as usize)
     }
 
     /// set tuple size at slot slot_num
     fn set_tuple_size(&mut self, slot_num: u32, size: u32) -> Result<()> {
         let data = u32_to_vec(size)?;
-        self.set_data(data, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num, 4)
+        self.set_data(data, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize, 4)
     }
 
     /// return true if the tuple is deleted or empty
@@ -390,22 +390,6 @@ impl DerefMut for TablePage {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.page
     }
-}
-
-fn vec_to_u64(data: &Vec<u8>, offset: usize, len: u32) -> Result<u64> {
-    let end_index= offset + (len as usize);
-    if data.len() < end_index {
-        return Err(Error::Value(String::from("the offset out of range")));
-    }
-    let mut result: u64 = 0;
-    let count = 1;
-    for index in offset..end_index {
-        let mut num = data.get(index).unwrap().clone();
-        let move_count = (len - count) * 8;
-        num <<= move_count;
-        result |= num;
-    }
-    Ok(result)
 }
 
 fn vec_to_u32(data: &Vec<u8>, offset: usize) -> Result<u32> {
