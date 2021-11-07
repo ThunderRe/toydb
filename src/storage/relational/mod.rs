@@ -11,3 +11,8 @@ mod test;
 mod page;
 #[cfg(test)]
 mod page_test;
+mod log_manager;
+mod transaction;
+mod tuple;
+mod rid;
+mod lock_manager;
