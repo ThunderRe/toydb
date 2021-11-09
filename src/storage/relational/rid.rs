@@ -1,3 +1,1 @@
-pub struct RID {
-
-}
+pub struct RID {}

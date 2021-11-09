@@ -1,3 +1,1 @@
-pub struct Tuple {
-    
-}
+pub struct Tuple {}

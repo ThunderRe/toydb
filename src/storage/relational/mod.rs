@@ -6,13 +6,13 @@ pub use disk_manager::DiskManager;
 
 #[cfg(test)]
 mod disk_manager_test;
-#[cfg(test)]
-mod test;
+mod lock_manager;
+mod log_manager;
 mod page;
 #[cfg(test)]
 mod page_test;
-mod log_manager;
+mod rid;
+#[cfg(test)]
+mod test;
 mod transaction;
 mod tuple;
-mod rid;
-mod lock_manager;

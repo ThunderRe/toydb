@@ -1,30 +1,43 @@
 use crate::error::Result;
-use crate::storage::relational::page::Page;
-
-
-#[test]
-fn test_page_lsn() -> Result<()> {
-    let mut page = Page::new()?;
-    let lsn = 222311u32;
-    let set_result = page.set_lsn(lsn)?;
-    assert_eq!(set_result, true);
-
-    let get_lsn = page.get_lsn()?;
-    assert_eq!(get_lsn, 222311u32);
-
-    Ok(())
-}
+use crate::storage::relational::page::HeaderPage;
 
 #[test]
-fn test_pagt_data() -> Result<()> {
-    let mut page = Page::new()?;
-    let push_data = vec![1u8, 2, 3, 4, 5, 6];
-    let push_result1 = page.push_data_with_offset(0, push_data)?;
-    assert_eq!(push_result1, true);
+fn test_header_page() -> Result<()> {
+    let mut header_page = HeaderPage::new()?;
+    header_page.init()?;
 
-    let push_data = vec![9u8, 23, 32, 12, 33];
-    let push_result2 = page.push_data_with_offset(7, push_data)?;
-    assert_eq!(push_result2, true);
+    let names = vec!["a", "b", "c"];
+    let root_ids = vec![1u32, 2, 3];
+
+    for index in 0..names.len() {
+        let name = names[index];
+        let root_id = root_ids[index];
+        header_page.insert_record(name, root_id);
+    }
+    // check record count
+    assert_eq!(header_page.get_record_count()?, 3);
+
+    for index in 0..names.len() {
+        let name = names[index];
+        let root_id = root_ids[index];
+        let find_root_id = header_page.get_root_id(name)?;
+        if let Some(root_id_result) = find_root_id {
+            assert_eq!(root_id_result, root_id);
+        } else {
+            assert!(false);
+        }
+    }
+
+    header_page.update_record("a", 4 as u32)?;
+    let update_root_id = header_page.get_root_id("a")?;
+    if let Some(root_id_result) = update_root_id {
+        assert_eq!(root_id_result, 4);
+    } else {
+        assert!(false);
+    }
+
+    header_page.delete_record("a")?;
+    assert_eq!(header_page.get_record_count()?, 2);
 
     Ok(())
 }

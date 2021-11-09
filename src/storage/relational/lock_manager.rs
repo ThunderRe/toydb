@@ -1,3 +1,1 @@
-pub struct LockManager {
-
-}
+pub struct LockManager {}

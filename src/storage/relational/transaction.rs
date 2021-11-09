@@ -1,3 +1,1 @@
-pub struct Transaction {
-
-}
+pub struct Transaction {}
