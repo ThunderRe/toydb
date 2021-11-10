@@ -250,8 +250,14 @@ impl HeaderPage {
 }
 
 impl TablePage {
+    /// table page's header end offset
+    /// or slot arrays start offset
     const SIZE_TABLE_PAGE_HEADER: usize = 24;
+
+    /// one tuple meta data size in slot array,
+    /// include tuple offset and tuple size
     const SIZE_TUPLE: usize = 8;
+
     const OFFSET_PREV_PAGE_ID: usize = 8;
     const OFFSET_NEXT_PAGE_ID: usize = 12;
     const OFFSET_FREE_SPACE: usize = 16;
@@ -264,16 +270,30 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    /// log_manager: the log manager in use
-    /// txn: the transaction that this page is created in
     pub fn init(
         page_id: u32,
         page_size: u32,
         prev_page_id: u32,
-        log_manager: LogManager,
-        txn: Transaction,
     ) -> Result<TablePage> {
-        todo!()
+        let page = Page {
+            page_id,
+            pin_count: 0,
+            is_dirty: false,
+            data: Arc::new(Mutex::new(vec![0u8; page_size as usize]))
+        };
+        let mut table_page = TablePage {
+            page,
+        };
+
+        // init data
+        let page_id_vec = u32_to_vec(page_id)?;
+        table_page.set_data(page_id_vec, 0, 4)?;
+        let prev_page_id_vec = u32_to_vec(prev_page_id)?;
+        table_page.set_data(prev_page_id_vec, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
+        let free_space_pointer_vec = u32_to_vec(page_size)?;
+        table_page.set_data(free_space_pointer_vec, page_size as usize - 4, 4)?;
+
+        Ok(table_page)
     }
 
     /// return the page ID of this table page
@@ -406,10 +426,10 @@ impl TablePage {
 
     /// return pointer to the end of current free space.
     /// see header commit
-    fn get_free_space_pointer(&self) -> Result<usize> {
+    fn get_free_space_pointer(&self) -> Result<u32> {
         let data = self.get_data()?;
         let pointer = vec_to_u32(&data, TablePage::OFFSET_FREE_SPACE)?;
-        Ok(pointer as usize)
+        Ok(pointer)
     }
 
     /// set the pointer, this should be the end of the current free space
@@ -421,10 +441,10 @@ impl TablePage {
 
     /// returned tuple count may be an overestimate because some slots may be empty
     /// return at least the number of tuples in the page
-    fn get_tuple_count(&self) -> Result<usize> {
+    fn get_tuple_count(&self) -> Result<u32> {
         let data = self.get_data()?;
         let count = vec_to_u32(&data, TablePage::OFFSET_TUPLE_COUNT)?;
-        Ok(count as usize)
+        Ok(count)
     }
 
     /// set the number of tuples in this page
@@ -435,14 +455,15 @@ impl TablePage {
     }
 
     fn get_free_space_remaining(&self) -> Result<usize> {
-        let free_space_pointer = self.get_free_space_pointer()?;
-        let tuple_count = self.get_tuple_count()?;
+        let free_space_pointer = self.get_free_space_pointer()? as usize;
+        let tuple_count = self.get_tuple_count()? as usize;
         Ok(free_space_pointer
             - TablePage::SIZE_TABLE_PAGE_HEADER
             - TablePage::SIZE_TUPLE * tuple_count)
     }
 
     /// return tuple offset at slot slot_num
+    /// slot_num start from 0
     fn get_tuple_offset_at_slot(&self, slot_num: u32) -> Result<u32> {
         let data = self.get_data()?;
         vec_to_u32(
@@ -481,6 +502,7 @@ impl TablePage {
         )
     }
 
+    /// i don't know the use of these three function
     /// return true if the tuple is deleted or empty
     pub fn is_deleted(tuple_size: u32) -> bool {
         (tuple_size & DELETE_MASK) != 0 || tuple_size == 0
