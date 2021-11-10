@@ -270,20 +270,14 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn init(
-        page_id: u32,
-        page_size: u32,
-        prev_page_id: u32,
-    ) -> Result<TablePage> {
+    pub fn init(page_id: u32, page_size: u32, prev_page_id: u32) -> Result<TablePage> {
         let page = Page {
             page_id,
             pin_count: 0,
             is_dirty: false,
-            data: Arc::new(Mutex::new(vec![0u8; page_size as usize]))
+            data: Arc::new(Mutex::new(vec![0u8; page_size as usize])),
         };
-        let mut table_page = TablePage {
-            page,
-        };
+        let mut table_page = TablePage { page };
 
         // init data
         let page_id_vec = u32_to_vec(page_id)?;
