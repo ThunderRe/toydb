@@ -12,7 +12,7 @@ fn test_header_page() -> Result<()> {
     for index in 0..names.len() {
         let name = names[index];
         let root_id = root_ids[index];
-        header_page.insert_record(name, root_id);
+        header_page.insert_record(name, root_id)?;
     }
     // check record count
     assert_eq!(header_page.get_record_count()?, 3);

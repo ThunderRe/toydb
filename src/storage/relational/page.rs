@@ -1,8 +1,5 @@
 use crate::error::{Error, Result};
-use crate::storage::relational::lock_manager::LockManager;
-use crate::storage::relational::log_manager::LogManager;
 use crate::storage::relational::rid::RID;
-use crate::storage::relational::transaction::Transaction;
 use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
@@ -13,8 +10,6 @@ pub const PAGE_SIZE: usize = 4095;
 
 /// LSN's offset in data
 pub const OFFSET_LSN: usize = 4;
-
-const DELETE_MASK: u32 = 2147483648;
 
 /// the data page, we have to implement
 pub struct Page {
@@ -107,11 +102,11 @@ impl Page {
 
     pub fn set_lsn(&mut self, lsn: u32) -> Result<bool> {
         let new_lsn = u32_to_vec(lsn)?;
-        self.set_data(new_lsn, OFFSET_LSN, 4)?;
+        self.set_data(&new_lsn, OFFSET_LSN, 4)?;
         Ok(true)
     }
 
-    fn set_data(&mut self, data: Vec<u8>, offset: usize, len: usize) -> Result<()> {
+    fn set_data(&mut self, data: &[u8], offset: usize, len: usize) -> Result<()> {
         if len < 0 || len > data.len() {
             return Err(Error::Value(String::from("the len is out of range")));
         }
@@ -120,7 +115,8 @@ impl Page {
         if offset < 0 || len + offset > self_data.len() {
             return Err(Error::Value(String::from("the offset/len is out of range")));
         }
-        self_data.splice(offset..offset + len, data);
+        let wriet_data = Vec::from(data);
+        self_data.splice(offset..offset + len, wriet_data);
         Ok(())
     }
 }
@@ -150,11 +146,11 @@ impl HeaderPage {
         // insert name
         let record_data = Vec::from(name.as_bytes());
         let record_data_len = record_data.len();
-        self.set_data(record_data, offset as usize, record_data_len)?;
+        self.set_data(&record_data, offset as usize, record_data_len)?;
 
         // insert root_id
         let root_id_data = u32_to_vec(root_id)?;
-        self.set_data(root_id_data, offset as usize + 32, 4)?;
+        self.set_data(&root_id_data, offset as usize + 32, 4)?;
 
         // add record
         self.set_record_count(record_count + 1)?;
@@ -177,7 +173,7 @@ impl HeaderPage {
 
             let data = self.get_data()?;
             let move_data = Vec::from(&data[start_index..end_index]);
-            self.set_data(move_data, offset, len)?;
+            self.set_data(&move_data, offset, len)?;
 
             self.set_record_count(record_count - 1)?;
             Ok(true)
@@ -191,7 +187,7 @@ impl HeaderPage {
         if let Some(record_num) = self.find_record(name)? {
             let offset = record_num * 36 + 4;
             let root_id_data = u32_to_vec(root_id)?;
-            self.set_data(root_id_data, offset as usize + 32, 4)?;
+            self.set_data(&root_id_data, offset as usize + 32, 4)?;
             return Ok(true);
         }
         Ok(false)
@@ -216,7 +212,7 @@ impl HeaderPage {
     /// helper function
     fn set_record_count(&mut self, record_count: u32) -> Result<()> {
         let record_data = u32_to_vec(record_count)?;
-        self.set_data(record_data, 0, 4)?;
+        self.set_data(&record_data, 0, 4)?;
         Ok(())
     }
 
@@ -266,6 +262,9 @@ impl TablePage {
     /// naming things is hard
     const OFFSET_TUPLE_SIZE: usize = 28;
 
+    // delete flag, the 32nd bit of tuple_size is the delte flag bit
+    const DELETE_MASK: u32 = 2147483648;
+
     /// init the tablePage header.
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
@@ -279,13 +278,13 @@ impl TablePage {
         };
         let mut table_page = TablePage { page };
 
-        // init data
+        // init data, the page id can't changed
         let page_id_vec = u32_to_vec(page_id)?;
-        table_page.set_data(page_id_vec, 0, 4)?;
-        let prev_page_id_vec = u32_to_vec(prev_page_id)?;
-        table_page.set_data(prev_page_id_vec, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
-        let free_space_pointer_vec = u32_to_vec(page_size)?;
-        table_page.set_data(free_space_pointer_vec, page_size as usize - 4, 4)?;
+        table_page.set_data(&page_id_vec, 0, 4)?;
+
+        table_page.set_tuple_count(0)?;
+        table_page.set_prev_page_id(prev_page_id)?;
+        table_page.set_free_space_pointer(page_size)?;
 
         Ok(table_page)
     }
@@ -311,86 +310,79 @@ impl TablePage {
     /// set the page id of the previous page in the table
     pub fn set_prev_page_id(&mut self, prev_page_id: u32) -> Result<bool> {
         let new_vec = u32_to_vec(prev_page_id)?;
-        self.set_data(new_vec, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
+        self.set_data(&new_vec, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
         Ok(true)
     }
 
     /// set the page id of the next page in the table
     pub fn set_next_page_id(&mut self, next_page_id: u32) -> Result<bool> {
         let new_vec = u32_to_vec(next_page_id)?;
-        self.set_data(new_vec, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
+        self.set_data(&new_vec, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
         Ok(true)
     }
 
     /// insert a tuple into the page
     /// tuple: tuple to insert
-    /// txn: transaction performing the insert
-    /// lock_manager: the lock manager
-    /// log_manager: the log manager
     ///
     /// RID: rid of the inserted tuple
-    pub fn insert_tuple(
-        &mut self,
-        tuple: &Tuple,
-        txn: Transaction,
-        lock_manager: LockManager,
-        log_manager: LogManager,
-    ) -> Result<Option<RID>> {
-        todo!()
+    pub fn insert_tuple(&mut self, tuple: &mut Tuple, rid: &mut RID) -> Result<bool> {
+        if tuple.get_length() == 0 {
+            return Err(Error::Value(String::from("Can't have empty tuple!")));
+        }
+        if self.get_free_space_remaining()? < tuple.get_length() + TablePage::SIZE_TUPLE {
+            return Ok(false);
+        }
+        let slot_num = self.get_tuple_count()?;
+        let free_space_pointer = self.get_free_space_pointer()? - tuple.get_length() as u32;
+        let save_data = tuple.get_data();
+        let save_len = save_data.len();
+
+        self.set_data(save_data, free_space_pointer as usize, save_len)?;
+        self.set_free_space_pointer(free_space_pointer)?;
+        self.set_tuple_offset_at_slot(slot_num, free_space_pointer)?;
+        self.set_tuple_size(slot_num, save_len as u32)?;
+        self.set_tuple_count(slot_num + 1)?;
+
+        rid.set(*self.get_page_id(), slot_num);
+
+        Ok(true)
     }
 
     /// mark a tuple as deleted. this does not actually delete the tuple
     /// rid: rid of the tuple to mark as deleted
-    /// txn: transaction performing the delete
-    /// lock_manager: the lock manager
-    /// log_manager: the log manager
-    pub fn mark_delete(
-        &mut self,
-        rid: &RID,
-        txn: Transaction,
-        lock_manager: LockManager,
-        log_manager: LogManager,
-    ) -> Result<bool> {
-        todo!()
+    pub fn mark_delete(&mut self, rid: &RID) -> Result<bool> {
+        let slot_num = *rid.get_slot_num();
+        if self.get_tuple_count()? <= slot_num {
+            return Ok(false);
+        }
+        let tuple_size = self.get_tuple_size(slot_num)?;
+        if TablePage::is_deleted(tuple_size as u32) {
+            return Ok(false);
+        }
+
+        if tuple_size > 0 {
+            self.set_tuple_size(slot_num, TablePage::set_deleted_flag(tuple_size as u32))?;
+        }
+        Ok(true)
     }
 
     /// update a tuple
     /// new_tuple: new value of the tuple
     /// rid: rid of the tuple
-    /// txn: transaction performing the update
-    /// lock_manager: the lock manager
-    /// log_manager: the log manager
-    pub fn update_tuple(
-        &mut self,
-        new_tuple: &Tuple,
-        rid: &RID,
-        txn: Transaction,
-        lock_manager: LockManager,
-        log_manager: LogManager,
-    ) -> Result<Option<Tuple>> {
+    pub fn update_tuple(&mut self, new_tuple: &Tuple, rid: &RID) -> Result<Option<Tuple>> {
         todo!()
     }
 
     /// to be called on commit or abort.
     /// Actually perform the delete or rollback an insert
-    pub fn apply_delete(
-        &mut self,
-        rid: &RID,
-        txn: Transaction,
-        log_manager: LogManager,
-    ) -> Result<()> {
+    pub fn apply_delete(&mut self, rid: &RID) -> Result<()> {
         todo!()
     }
 
     /// to be called on abort.
     /// Rollback a delete,
     /// i.e. the reverses a MarkDelete
-    pub fn rollback_delete(
-        &mut self,
-        rid: &RID,
-        txn: Transaction,
-        log_manager: LogManager,
-    ) -> Result<()> {
+    pub fn rollback_delete(&mut self, rid: &RID) -> Result<()> {
         todo!()
     }
 
@@ -398,12 +390,7 @@ impl TablePage {
     /// rid: rid of the tuple to read
     /// tnx: transaction performing the read
     /// lock_manager: the lock manager
-    pub fn get_tuple(
-        &self,
-        rid: &RID,
-        txn: Transaction,
-        lock_manager: LockManager,
-    ) -> Result<Option<Tuple>> {
+    pub fn get_tuple(&self, rid: &RID) -> Result<Option<Tuple>> {
         todo!()
     }
 
@@ -429,7 +416,7 @@ impl TablePage {
     /// set the pointer, this should be the end of the current free space
     fn set_free_space_pointer(&mut self, free_space_pointer: u32) -> Result<()> {
         let pointer_data = u32_to_vec(free_space_pointer)?;
-        self.set_data(pointer_data, TablePage::OFFSET_FREE_SPACE, 4);
+        self.set_data(&pointer_data, TablePage::OFFSET_FREE_SPACE, 4)?;
         Ok(())
     }
 
@@ -444,7 +431,7 @@ impl TablePage {
     /// set the number of tuples in this page
     fn set_tuple_count(&mut self, tuple_count: u32) -> Result<()> {
         let tuple_data = u32_to_vec(tuple_count)?;
-        self.set_data(tuple_data, TablePage::OFFSET_TUPLE_COUNT, 4);
+        self.set_data(&tuple_data, TablePage::OFFSET_TUPLE_COUNT, 4)?;
         Ok(())
     }
 
@@ -470,7 +457,7 @@ impl TablePage {
     fn set_tuple_offset_at_slot(&mut self, slot_num: u32, offset: u32) -> Result<()> {
         let data = u32_to_vec(offset)?;
         self.set_data(
-            data,
+            &data,
             TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize,
             4,
         )
@@ -490,26 +477,25 @@ impl TablePage {
     fn set_tuple_size(&mut self, slot_num: u32, size: u32) -> Result<()> {
         let data = u32_to_vec(size)?;
         self.set_data(
-            data,
+            &data,
             TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize,
             4,
         )
     }
 
-    /// i don't know the use of these three function
     /// return true if the tuple is deleted or empty
     pub fn is_deleted(tuple_size: u32) -> bool {
-        (tuple_size & DELETE_MASK) != 0 || tuple_size == 0
+        (tuple_size & TablePage::DELETE_MASK) != 0 || tuple_size == 0
     }
 
     /// return tuple size with the deleted flag set
     pub fn set_deleted_flag(tuple_size: u32) -> u32 {
-        tuple_size | DELETE_MASK
+        tuple_size | TablePage::DELETE_MASK
     }
 
     /// return tuple size with the deleted flag unset
     pub fn unset_deleted_flag(tuple_size: u32) -> u32 {
-        tuple_size & !DELETE_MASK
+        tuple_size & !TablePage::DELETE_MASK
     }
 }
 
