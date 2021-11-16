@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::storage::relational::rid::RID;
 use crate::storage::relational::tuple::Tuple;
+use std::fmt::Result;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::sync::{Arc, Mutex};
@@ -163,7 +164,7 @@ impl HeaderPage {
             return Ok(false);
         }
 
-        return if let Some(record_num) = self.find_record(name)? {
+        if let Some(record_num) = self.find_record(name)? {
             // the record start offset
             let offset = record_num as usize * 36 + 4;
             // find need move data len
@@ -180,7 +181,7 @@ impl HeaderPage {
         } else {
             // record not exits
             Ok(false)
-        };
+        }
     }
 
     pub fn update_record(&mut self, name: &str, root_id: u32) -> Result<bool> {
@@ -332,7 +333,13 @@ impl TablePage {
         if self.get_free_space_remaining()? < tuple.get_length() + TablePage::SIZE_TUPLE {
             return Ok(false);
         }
-        let slot_num = self.get_tuple_count()?;
+
+        // if we have blank slot, we can use it
+        let slot_num = match self.get_free_slot_array()? {
+            Some(i) => i,
+            None => self.get_tuple_count()?,
+        };
+
         let free_space_pointer = self.get_free_space_pointer()? - tuple.get_length() as u32;
         let save_data = tuple.get_data();
         let save_len = save_data.len();
@@ -341,7 +348,9 @@ impl TablePage {
         self.set_free_space_pointer(free_space_pointer)?;
         self.set_tuple_offset_at_slot(slot_num, free_space_pointer)?;
         self.set_tuple_size(slot_num, save_len as u32)?;
-        self.set_tuple_count(slot_num + 1)?;
+        if slot_num == self.get_tuple_count()? {
+            self.set_tuple_count(slot_num + 1)?;
+        }
 
         rid.set(*self.get_page_id(), slot_num);
 
@@ -460,7 +469,7 @@ impl TablePage {
             return Err(Error::Value(String::from("Free space appearss before tuples.")));
         }
 
-        // remove slot 
+        // remove slot
         self.set_tuple_size(slot_num, 0)?;
         self.set_tuple_offset_at_slot(slot_num, 0)?;
 
@@ -503,6 +512,19 @@ impl TablePage {
     /// cur_rid: the RID of the current tuple
     pub fn get_next_tuple_rid(&self, cur_rid: &RID) -> Result<Option<RID>> {
         todo!()
+    }
+
+    /// foreach slot array we haved, if tuple_size equals 0,
+    /// we should return slot_num of the tuple
+    fn get_free_slot_array(&self) -> Result<Option<u32>> {
+        let tuple_count = self.get_tuple_count()?;
+        for i in 0..tuple_count {
+            let tuple_size = self.get_tuple_size(i)?;
+            if tuple_size == 0 {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
     }
 
     /// return pointer to the end of current free space.
