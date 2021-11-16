@@ -445,7 +445,38 @@ impl TablePage {
     /// to be called on commit or abort.
     /// Actually perform the delete or rollback an insert
     pub fn apply_delete(&mut self, rid: &RID) -> Result<()> {
-        todo!()
+        let slot_num = *rid.get_slot_num();
+        let tuple_count = self.get_tuple_count()?;
+        if slot_num < tuple_count {
+            return Err(Error::Value(String::from("Cannot have more slots than tuples.")));
+        }
+        let tuple_size = self.get_tuple_size(slot_num)?;
+        if !TablePage::is_deleted(tuple_size as u32) {
+            return Err(Error::Value(String::from("The tuple was not deleted.")));
+        }
+        let tuple_offset = self.get_tuple_offset_at_slot(slot_num)?;
+        let free_space_pointer = self.get_free_space_pointer()?;
+        if tuple_offset < free_space_pointer {
+            return Err(Error::Value(String::from("Free space appearss before tuples.")));
+        }
+
+        // remove slot 
+        self.set_tuple_size(slot_num, 0)?;
+        self.set_tuple_offset_at_slot(slot_num, 0)?;
+
+        self.set_free_space_pointer(free_space_pointer + tuple_size as u32)?;
+
+        // move data
+        let move_data = &self.get_data()?[free_space_pointer as usize..tuple_offset as usize];
+        let move_data_len = move_data.len();
+        self.set_data(move_data, free_space_pointer as usize + tuple_size, move_data_len)?;
+        // update slot
+        for i in 0..slot_num {
+            let tuple_offset_i = self.get_tuple_offset_at_slot(i)?;
+            self.set_tuple_offset_at_slot(i, tuple_offset_i + tuple_size as u32)?;
+        }
+
+        Ok(())
     }
 
     /// to be called on abort.
