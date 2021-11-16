@@ -28,5 +28,4 @@ impl Tuple {
     pub fn get_length(&self) -> usize {
         self.data.len()
     }
-
 }

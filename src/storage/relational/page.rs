@@ -371,7 +371,12 @@ impl TablePage {
     /// old_tuple: old value of the tuple
     /// rid: rid of the tuple
     /// although we only need to change the data of the tuple, we need to wrap it with a tuple object when passing it.
-    pub fn update_tuple(&mut self, new_tuple: &Tuple, _old_tuple: Tuple, rid: &RID) -> Result<bool> {
+    pub fn update_tuple(
+        &mut self,
+        new_tuple: &Tuple,
+        _old_tuple: Tuple,
+        rid: &RID,
+    ) -> Result<bool> {
         let new_tuple_len = new_tuple.get_length();
         let slot_num = *rid.get_slot_num();
         if new_tuple_len == 0 {
@@ -396,13 +401,19 @@ impl TablePage {
         let tuple_offset = self.get_tuple_offset_at_slot(slot_num)? as usize;
         let free_space_pointer = self.get_free_space_pointer()? as usize;
         if tuple_offset < free_space_pointer {
-            return Err(Error::Value(String::from("Offset should appear after current free space position.")));
+            return Err(Error::Value(String::from(
+                "Offset should appear after current free space position.",
+            )));
         }
 
         // move the before data of the tuple_offset,to make room for the new tuple
         let move_prev_data = &self.get_data()?[free_space_pointer..tuple_offset];
         let move_prev_data_len = move_prev_data.len();
-        self.set_data(move_prev_data, free_space_pointer + tuple_size - new_tuple_len, move_prev_data_len)?;
+        self.set_data(
+            move_prev_data,
+            free_space_pointer + tuple_size - new_tuple_len,
+            move_prev_data_len,
+        )?;
 
         // update free space pointer
         self.set_free_space_pointer((free_space_pointer + tuple_size - new_tuple_len) as u32)?;
@@ -410,16 +421,22 @@ impl TablePage {
         // update tuple data
         let update_data = new_tuple.get_data();
         self.set_data(update_data, tuple_offset + tuple_size - new_tuple_len, new_tuple_len)?;
-        
+
         // update all tuple offset
         // we just update slot num < solt_num
         for i in 0..slot_num as usize {
             let solt_offset_i = self.get_tuple_offset_at_slot(i as u32)?;
-            self.set_tuple_offset_at_slot(i as u32, solt_offset_i + tuple_size as u32 - new_tuple_len as u32)?;
+            self.set_tuple_offset_at_slot(
+                i as u32,
+                solt_offset_i + tuple_size as u32 - new_tuple_len as u32,
+            )?;
         }
 
         // set meta data
-        self.set_tuple_offset_at_slot(slot_num, (tuple_offset + tuple_size - new_tuple_len) as u32)?;
+        self.set_tuple_offset_at_slot(
+            slot_num,
+            (tuple_offset + tuple_size - new_tuple_len) as u32,
+        )?;
         self.set_tuple_size(slot_num, new_tuple_len as u32)?;
 
         Ok(true)
