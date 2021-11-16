@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::storage::relational::rid::RID;
 use crate::storage::relational::tuple::Tuple;
-use std::fmt::Result;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::sync::{Arc, Mutex};
@@ -492,26 +491,76 @@ impl TablePage {
     /// Rollback a delete,
     /// i.e. the reverses a MarkDelete
     pub fn rollback_delete(&mut self, rid: &RID) -> Result<()> {
-        todo!()
+        let slot_num = *rid.get_slot_num();
+        if slot_num >= self.get_tuple_count()? {
+            return Err(Error::Value(String::from("we can't have more slots than tuples.")));
+        }
+
+        let tuple_size = self.get_tuple_size(slot_num)?;
+        if TablePage::is_deleted(tuple_size as u32) {
+            self.set_tuple_size(slot_num, TablePage::unset_deleted_flag(tuple_size as u32))?;
+        }
+
+        Ok(())
     }
 
     /// read a tuple from a table
     /// rid: rid of the tuple to read
-    /// tnx: transaction performing the read
-    /// lock_manager: the lock manager
     pub fn get_tuple(&self, rid: &RID) -> Result<Option<Tuple>> {
-        todo!()
+        let slot_num = *rid.get_slot_num();
+        if slot_num >= self.get_tuple_count()? {
+            return Ok(None);
+        }
+        let tuple_size = self.get_tuple_size(slot_num)?;
+        if TablePage::is_deleted(tuple_size as u32) {
+            return Ok(None);
+        }
+
+        let tuple_offset = self.get_tuple_offset_at_slot(slot_num)?;
+        let data_ref =
+            &self.get_data()?[(tuple_offset as usize)..(tuple_size as usize + tuple_size)];
+
+        let tuple_data = Vec::from(data_ref);
+        let tuple_rid = RID::from(*self.get_page_id(), slot_num);
+        let tuple = Tuple::new(tuple_data, tuple_rid);
+        Ok(Some(tuple))
     }
 
     /// return the first tuple if exists
     pub fn get_first_tuple_rid(&self) -> Result<Option<RID>> {
-        todo!()
+        let tuple_count = self.get_tuple_count()?;
+        if tuple_count == 0 {
+            return Ok(None);
+        }
+        let page_id = *self.get_page_id();
+
+        for slot_num in 0..tuple_count {
+            let tuple_size = self.get_tuple_size(slot_num)?;
+            if !TablePage::is_deleted(tuple_size as u32) {
+                let rid = RID::from(page_id, slot_num);
+                return Ok(Some(rid));
+            }
+        }
+        Ok(None)
     }
 
     /// return the next tuple exists
     /// cur_rid: the RID of the current tuple
     pub fn get_next_tuple_rid(&self, cur_rid: &RID) -> Result<Option<RID>> {
-        todo!()
+        let page_id = *self.get_page_id();
+        if !page_id.eq(cur_rid.get_page_id()) {
+            return Ok(None);
+        }
+        let slot_num = *cur_rid.get_slot_num();
+        for i in (slot_num + 1)..self.get_tuple_count()? {
+            let tuple_size = self.get_tuple_size(i)?;
+            if !TablePage::is_deleted(tuple_size as u32) {
+                let rid = RID::from(page_id, i);
+                return Ok(Some(rid));
+            }
+        }
+
+        Ok(None)
     }
 
     /// foreach slot array we haved, if tuple_size equals 0,

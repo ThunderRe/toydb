@@ -10,7 +10,7 @@ impl RID {
     }
 
     pub fn from(page_id: u32, slot_num: u32) -> RID {
-        RID { page_id: page_id, slot_num: slot_num, is_inited: true }
+        RID { page_id, slot_num, is_inited: true }
     }
 
     pub fn set(&mut self, page_id: u32, slot_num: u32) {
@@ -20,5 +20,9 @@ impl RID {
 
     pub fn get_slot_num(&self) -> &u32 {
         &self.slot_num
+    }
+
+    pub fn get_page_id(&self) -> &u32 {
+        &self.page_id
     }
 }
