@@ -4,6 +4,7 @@ use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::sync::{Arc, Mutex};
+use crate::serialization::ToVecAndByVec;
 
 /// 每个Page的固定大小：4KB
 pub const PAGE_SIZE: usize = 4095;
@@ -49,7 +50,7 @@ pub struct HeaderPage {
 ///  /--------------------------------------------------------------
 /// | TupleCount (4) | Tuple_1 offset (4) | Tuple_1 size (4) | ... |
 ///  /--------------------------------------------------------------
-struct TablePage {
+pub struct TablePage {
     page: Page,
 }
 
@@ -244,6 +245,8 @@ impl HeaderPage {
         Ok(None)
     }
 }
+
+
 
 impl TablePage {
     /// table page's header end offset
@@ -667,6 +670,26 @@ impl TablePage {
     /// return tuple size with the deleted flag unset
     pub fn unset_deleted_flag(tuple_size: u32) -> u32 {
         tuple_size & !TablePage::DELETE_MASK
+    }
+}
+
+impl ToVecAndByVec<HeaderPage> for HeaderPage {
+    fn to_vec(t: &HeaderPage) -> Vec<u8> {
+        todo!()
+    }
+
+    fn by_vec(data: &Vec<u8>) -> Option<HeaderPage> {
+        todo!()
+    }
+}
+
+impl ToVecAndByVec<TablePage> for TablePage {
+    fn to_vec(t: &TablePage) -> Vec<u8> {
+        todo!()
+    }
+
+    fn by_vec(data: &Vec<u8>) -> Option<TablePage> {
+        todo!()
     }
 }
 
