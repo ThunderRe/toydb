@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use crate::error::Result;
+use crate::error::{Result, Error};
 use crate::serialization::ToVecAndByVec;
 use crate::storage::relational::DiskManager;
-use crate::storage::relational::page::{HeaderPage, TablePage};
+use crate::storage::relational::page::{HeaderPage, PAGE_SIZE, TablePage};
 
 /// BufferPoolManager reads disk pages to and from its internal buffer pool
 struct BufferPoolManager {
@@ -63,14 +63,21 @@ impl BufferPoolManager {
 
     /// flushes the target page to disk
     pub fn flush_page(&mut self, page_id: u32) -> Result<bool> {
+        if page_id.eq(&0) {
+            return Ok(false);
+        }
         todo!()
     }
 
     /// creates a new page in the buffer pool
     pub fn new_page(&mut self, page_id: u32) -> Result<TablePage> {
         // first we should init
+        if page_id.eq(&0) {
+            return Err(Error::Value(String::from("can't create page, because page_id can't equals 0")));
+        }
+        TablePage::init(page_id, PAGE_SIZE, page_id - 1);
 
-       todo!()
+        todo!()
     }
 
     /// deletes a page from the buffer pool

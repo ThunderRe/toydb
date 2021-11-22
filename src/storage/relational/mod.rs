@@ -13,3 +13,4 @@ mod rid;
 #[cfg(test)]
 mod test;
 mod tuple;
+mod buffer_pool;

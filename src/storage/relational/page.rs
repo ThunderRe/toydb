@@ -1,20 +1,23 @@
+use std::convert::TryFrom;
+use std::mem::size_of;
 use crate::error::{Error, Result};
 use crate::storage::relational::rid::RID;
 use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::sync::{Arc, Mutex};
+use log::Level::Error;
 use crate::serialization::ToVecAndByVec;
 
 /// 每个Page的固定大小：4KB
 pub const PAGE_SIZE: usize = 4095;
 
-/// LSN's offset in data
+///
 pub const OFFSET_LSN: usize = 4;
 
 /// the data page, we have to implement
 pub struct Page {
-    data: Arc<Mutex<Vec<u8>>>,
+    data: [u8; PAGE_SIZE],
     page_id: u32,
     pin_count: u32,
     is_dirty: bool,
@@ -57,28 +60,29 @@ pub struct TablePage {
 impl Page {
     pub fn new() -> Result<Page> {
         Ok(Page {
-            data: Arc::new(Mutex::new(vec![0u8; PAGE_SIZE])),
+            data: [0u8; PAGE_SIZE],
             page_id: 0,
             pin_count: 0,
             is_dirty: false,
         })
     }
 
-    pub fn get_data(&self) -> Result<Vec<u8>> {
-        let result = self.data.lock()?;
-        Ok(result.clone())
+    /// read data from page
+    pub fn read_data(&self, data: &mut [u8]) -> Result<()> {
+        if data.len() != self.data.len() {
+            return Err(Error::Value("the read buffer size if not equals PAGE_SIZE".to_string()));
+        }
+        data.copy_from_slice(&self.data);
+        Ok(())
     }
 
-    /// push data with offset
-    pub fn push_data_with_offset(&mut self, offset: u32, push_data: Vec<u8>) -> Result<bool> {
-        if offset < 0 || (offset + push_data.len() as u32) as usize > PAGE_SIZE {
-            return Err(Error::Value(String::from("the offset was out of range")));
+    /// write data to page
+    pub fn write_data(&mut self, data: &[u8]) -> Result<()> {
+        if data.len() != self.data.len() {
+            return Err(Error::Value("the writing data size is not equals PAGE_SIZE".to_string()));
         }
-        let mut data = self.data.lock()?;
-        let start = offset as usize;
-        let end = start + push_data.len();
-        data.splice(start..end, push_data);
-        Ok(true)
+        self.data.copy_from_slice(data);
+        Ok(())
     }
 
     pub fn get_page_id(&self) -> &u32 {
@@ -91,34 +95,6 @@ impl Page {
 
     pub fn is_dirty(&self) -> &bool {
         &self.is_dirty
-    }
-
-    pub fn get_lsn(&self) -> Result<u32> {
-        let data = self.get_data()?;
-        if data.len() < OFFSET_LSN + 4 {
-            return Err(Error::Value("the data size less than OFFSET_LSN + 4".to_string()));
-        }
-        vec_to_u32(&data, OFFSET_LSN)
-    }
-
-    pub fn set_lsn(&mut self, lsn: u32) -> Result<bool> {
-        let new_lsn = u32_to_vec(lsn)?;
-        self.set_data(&new_lsn, OFFSET_LSN, 4)?;
-        Ok(true)
-    }
-
-    fn set_data(&mut self, data: &[u8], offset: usize, len: usize) -> Result<()> {
-        if len < 0 || len > data.len() {
-            return Err(Error::Value(String::from("the len is out of range")));
-        }
-
-        let mut self_data = self.data.lock()?;
-        if offset < 0 || len + offset > self_data.len() {
-            return Err(Error::Value(String::from("the offset/len is out of range")));
-        }
-        let wriet_data = Vec::from(data);
-        self_data.splice(offset..offset + len, wriet_data);
-        Ok(())
     }
 }
 
@@ -249,6 +225,9 @@ impl HeaderPage {
 
 
 impl TablePage {
+
+    ///LSN's offset in data
+    const LSN_OFFSET: usize = 4;
     /// table page's header end offset
     /// or slot arrays start offset
     const SIZE_TABLE_PAGE_HEADER: usize = 24;
@@ -272,12 +251,12 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn init(page_id: u32, page_size: u32, prev_page_id: u32) -> Result<TablePage> {
+    pub fn init(page_id: u32, page_size: usize, prev_page_id: u32) -> Result<TablePage> {
         let page = Page {
             page_id,
             pin_count: 0,
             is_dirty: false,
-            data: Arc::new(Mutex::new(vec![0u8; page_size as usize])),
+            data: Arc::new(Mutex::new(vec![0u8; page_size])),
         };
         let mut table_page = TablePage { page };
 
@@ -287,9 +266,16 @@ impl TablePage {
 
         table_page.set_tuple_count(0)?;
         table_page.set_prev_page_id(prev_page_id)?;
-        table_page.set_free_space_pointer(page_size)?;
+        table_page.set_free_space_pointer(page_size as u32)?;
 
         Ok(table_page)
+    }
+
+    /// get lsn from table page
+    pub fn get_lsn(&self) -> u32 {
+        let data = &self.data[OFFSET_LSN..OFFSET_LSN + size_of::<u32>()];
+        let lsn_data:[u8; size_of::<u32>()] = <[u8; size_of::<u32>()]>::try_from(data).unwrap();
+        u32::from_ne_bytes(lsn_data)
     }
 
     /// return the page ID of this table page
