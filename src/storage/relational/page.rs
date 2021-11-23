@@ -501,8 +501,8 @@ impl TablePage {
         }
 
         let tuple_size = self.get_tuple_size(slot_num)?;
-        if TablePage::is_deleted(tuple_size as u32) {
-            self.set_tuple_size(slot_num, TablePage::unset_deleted_flag(tuple_size as u32))?;
+        if TablePage::is_deleted(tuple_size) {
+            self.set_tuple_size(slot_num, TablePage::unset_deleted_flag(tuple_size))?;
         }
 
         Ok(())
