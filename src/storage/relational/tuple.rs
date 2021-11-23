@@ -1,6 +1,7 @@
 pub struct Tuple {
     data: Vec<u8>,
     rid: Option<RID>,
+    allocated: bool
 }
 
 pub struct RID {
@@ -10,12 +11,12 @@ pub struct RID {
 
 impl Tuple {
     pub fn empty() -> Tuple {
-        Tuple { data: Vec::new(), rid: None}
+        Tuple { data: Vec::new(), rid: None, allocated: false}
     }
 
     pub fn from_data(data: &[u8]) -> Tuple {
         let vec = Vec::from(data);
-        Tuple { data: vec, rid: None}
+        Tuple { data: vec, rid: None, allocated: false}
     }
 
     pub fn get_data(&self) -> &[u8] {
@@ -34,10 +35,24 @@ impl Tuple {
         }
     }
 
+    pub fn set_rid(&mut self, rid: RID) -> bool {
+        if let Some(_) = self.rid {
+            return false;
+        }
+        self.rid = Some(rid);
+        true
+    }
+
     /// Get length of the tuple
     pub fn get_length(&self) -> usize {
         self.data.len()
     }
+
+    pub fn allocated(&mut self) {
+        self.allocated = true;
+    }
+
+
 }
 
 impl RID {
