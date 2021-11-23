@@ -1,23 +1,29 @@
-use super::rid::RID;
-
 pub struct Tuple {
     data: Vec<u8>,
     rid: Option<RID>,
-    allocated: bool, // allocated memory
+}
+
+pub struct RID {
+    page_id: u32,
+    slot_num: u32,
 }
 
 impl Tuple {
     pub fn empty() -> Tuple {
-        Tuple { data: Vec::new(), rid: None, allocated: false }
+        Tuple { data: Vec::new(), rid: None}
     }
 
-    pub fn new(data: Vec<u8>, rid: RID) -> Tuple {
-        Tuple { data, rid: Some(rid), allocated: true }
+    pub fn from_data(data: &[u8]) -> Tuple {
+        let vec = Vec::from(data);
+        Tuple { data: vec, rid: None}
     }
 
-    /// Get the data of this tuple in the table's backing store
-    pub fn get_data(&self) -> &Vec<u8> {
+    pub fn get_data(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn get_data_mut(&self) -> &mut [u8] {
+        &mut self.data
     }
 
     /// return RID of current tuple
@@ -32,4 +38,23 @@ impl Tuple {
     pub fn get_length(&self) -> usize {
         self.data.len()
     }
+}
+
+impl RID {
+    pub fn new(page_id: u32, slot_num: u32) -> RID {
+        RID {
+            page_id,
+            slot_num
+        }
+    }
+
+    pub fn get_page_id(&self) -> &u32 {
+        &self.page_id
+    }
+
+    pub fn get_slot_num(&self) -> &u32 {
+        &self.slot_num
+    }
+
+
 }

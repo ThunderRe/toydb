@@ -1,11 +1,8 @@
-use std::convert::TryFrom;
-use std::mem::size_of;
 use crate::error::{Error, Result};
 use crate::storage::relational::rid::RID;
 use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
-use std::sync::{Arc, Mutex};
 use crate::serialization::ToVecAndByVec;
 
 /// 每个Page的固定大小：4KB
@@ -313,17 +310,14 @@ impl TablePage {
     }
 
     /// set the page id of the next page in the table
-    pub fn set_next_page_id(&mut self, next_page_id: u32) -> Result<bool> {
-        let prev_data = prev_page_id.to_le_bytes();
-        self.write_data(&prev_data, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
+    pub fn set_next_page_id(&mut self, next_page_id: u32) -> Result<()> {
+        let next_page = next_page_id.to_le_bytes();
+        self.write_data(&next_page, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
         Ok(())
 
     }
 
     /// insert a tuple into the page
-    /// tuple: tuple to insert
-    ///
-    /// RID: rid of the inserted tuple
     pub fn insert_tuple(&mut self, tuple: &mut Tuple, rid: &mut RID) -> Result<bool> {
         if tuple.get_length() == 0 {
             return Err(Error::Value(String::from("Can't have empty tuple!")));
