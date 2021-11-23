@@ -43,7 +43,7 @@ impl ClockReplacer {
     /// 进行一次扫描
     fn scan(&mut self) {
         for frame in self.queue.iter_mut() {
-            if frame.ref_count <= 0 {
+            if frame.ref_count.eq(&0) {
                 frame.flag = false;
             }
         }
@@ -63,7 +63,7 @@ impl ClockReplacer {
     fn flush_index(&mut self) {
         self.map.clear();
         for (index, frame) in self.queue.iter().enumerate() {
-            self.map.insert(frame.page_id.clone(), index.clone());
+            self.map.insert(frame.page_id, Clone::clone(&index));
         }
     }
 
@@ -110,6 +110,7 @@ impl ClockReplacer {
 
         Ok(false)
     }
+
 }
 
 impl Replacer for ClockReplacer {
@@ -117,10 +118,8 @@ impl Replacer for ClockReplacer {
         if let Some(frame) = self.find_mut(&frame_id) {
             frame.flag = true;
             return Ok(true);
-        } else {
-            if !self.try_remove()? {
-                return Ok(false);
-            }
+        } else if !self.try_remove()? {
+            return Ok(false);
         }
 
         if self.size() < self.size {

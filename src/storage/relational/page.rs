@@ -6,14 +6,10 @@ use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::sync::{Arc, Mutex};
-use log::Level::Error;
 use crate::serialization::ToVecAndByVec;
 
 /// 每个Page的固定大小：4KB
 pub const PAGE_SIZE: usize = 4095;
-
-///
-pub const OFFSET_LSN: usize = 4;
 
 /// the data page, we have to implement
 pub struct Page {
@@ -68,21 +64,42 @@ impl Page {
     }
 
     /// read data from page
-    pub fn read_data(&self, data: &mut [u8]) -> Result<()> {
-        if data.len() != self.data.len() {
-            return Err(Error::Value("the read buffer size if not equals PAGE_SIZE".to_string()));
+    pub fn read_data(&self, data: &mut [u8], offset: usize, len: usize) -> Result<usize> {
+        if offset > data.len() {
+            return Err(Error::Value("offset is out of range".to_string()));
         }
-        data.copy_from_slice(&self.data);
-        Ok(())
+        let mut end = offset + len;
+        if end > offset + data.len() {
+            end = offset + data.len();
+        }
+        if end > self.data.len() {
+            end = self.data.len();
+        }
+
+        let read_data = &self.data[offset..end];
+        data.copy_from_slice(read_data);
+        Ok(end - offset)
     }
 
     /// write data to page
-    pub fn write_data(&mut self, data: &[u8]) -> Result<()> {
-        if data.len() != self.data.len() {
-            return Err(Error::Value("the writing data size is not equals PAGE_SIZE".to_string()));
+    pub fn write_data(&mut self, data: &[u8], offset: usize, len: usize) -> Result<usize> {
+        if offset > data.len() {
+            return Err(Error::Value("offset is out of range".to_string()));
         }
-        self.data.copy_from_slice(data);
-        Ok(())
+        let mut end = offset + len;
+        if end > offset + data.len() {
+            end = offset + data.len();
+        }
+        if end > self.data.len() {
+            end = self.data.len();
+        }
+
+        // be careful! We need to strictly ensure the consistency of the length of the written data
+        let write_data = &data[..end - offset];
+        let write_splice = &mut self.data[offset..end];
+        write_splice.copy_from_slice(write_data);
+
+        Ok(end - offset)
     }
 
     pub fn get_page_id(&self) -> &u32 {
@@ -96,15 +113,17 @@ impl Page {
     pub fn is_dirty(&self) -> &bool {
         &self.is_dirty
     }
+
 }
 
 impl HeaderPage {
-    pub fn new() -> Result<HeaderPage> {
-        Ok(HeaderPage { page: Page::new()? })
-    }
 
-    pub fn init(&mut self) -> Result<()> {
-        self.set_record_count(0)
+    pub fn new() -> Result<HeaderPage> {
+        let header_page = HeaderPage {
+            page : Page::new()?
+        };
+        header_page.set_record_count(0);
+        Ok(header_page)
     }
 
     /// record related
@@ -113,21 +132,20 @@ impl HeaderPage {
             return Ok(false);
         }
         // check for duplicate name
-        if self.find_record(name)?.is_some() {
+        if let Some(_) = self.find_record(name)? {
             return Ok(false);
         }
-
         let record_count = self.get_record_count()?;
-        let offset = 4 + record_count * 36;
 
         // insert name
-        let record_data = Vec::from(name.as_bytes());
-        let record_data_len = record_data.len();
-        self.set_data(&record_data, offset as usize, record_data_len)?;
+        let name_offset = 4 + record_count as usize * 36;
+        let name_data = name.as_bytes();
+        self.write_data(name_data, name_offset, 32)?;
 
         // insert root_id
-        let root_id_data = u32_to_vec(root_id)?;
-        self.set_data(&root_id_data, offset as usize + 32, 4)?;
+        let root_id_offset = name_offset + 32;
+        let root_id_data = root_id.to_le_bytes();
+        self.write_data(&root_id_data, root_id_offset, 4)?;
 
         // add record
         self.set_record_count(record_count + 1)?;
@@ -144,14 +162,10 @@ impl HeaderPage {
             // the record start offset
             let offset = record_num as usize * 36 + 4;
             // find need move data len
-            let len = (record_count - record_num - 1) as usize * 36;
-            let start_index = offset + 36;
-            let end_index = start_index + len;
+            let start_pointer = offset + 36;
+            let end_pointer = record_count as usize * 36 + 4;
 
-            let data = self.get_data()?;
-            let move_data = Vec::from(&data[start_index..end_index]);
-            self.set_data(&move_data, offset, len)?;
-
+            self.data.copy_within(start_pointer..end_pointer, offset);
             self.set_record_count(record_count - 1)?;
             Ok(true)
         } else {
@@ -162,9 +176,9 @@ impl HeaderPage {
 
     pub fn update_record(&mut self, name: &str, root_id: u32) -> Result<bool> {
         if let Some(record_num) = self.find_record(name)? {
-            let offset = record_num * 36 + 4;
-            let root_id_data = u32_to_vec(root_id)?;
-            self.set_data(&root_id_data, offset as usize + 32, 4)?;
+            let offset = record_num as usize * 36 + 4;
+            let root_id_data = root_id.to_le_bytes();
+            self.write_data(&root_id_data, offset, 4)?;
             return Ok(true);
         }
         Ok(false)
@@ -173,23 +187,23 @@ impl HeaderPage {
     /// return root if success
     pub fn get_root_id(&self, name: &str) -> Result<Option<u32>> {
         if let Some(record_num) = self.find_record(name)? {
-            let offset = record_num * 36 + 4;
-            let data = self.get_data()?;
-            let root_id = vec_to_u32(&data, offset as usize + 32)?;
-            return Ok(Some(root_id));
+            let offset = record_num as usize * 36 + 4 + 32;
+            let root_id_data = [0u8; 4];
+            self.read_data(&mut root_id_data, offset, 4)?;
+            return Ok(Some(u32::from_le_bytes(root_id_data)));
         }
         Ok(None)
     }
 
     pub fn get_record_count(&self) -> Result<u32> {
-        let data = self.get_data()?;
-        vec_to_u32(&data, 0)
+        let record_count_data = [0u8; 4];
+        self.read_data(&mut record_count_data, 0, 4)?;
+        Ok(u32::from_le_bytes(record_count_data))
     }
 
-    /// helper function
     fn set_record_count(&mut self, record_count: u32) -> Result<()> {
-        let record_data = u32_to_vec(record_count)?;
-        self.set_data(&record_data, 0, 4)?;
+        let data = record_count.to_le_bytes();
+        self.write_data(&data, 0, 4)?;
         Ok(())
     }
 
@@ -197,37 +211,32 @@ impl HeaderPage {
         if name.len() > 32 {
             return Ok(None);
         }
-        let record_count = self.get_record_count()? as usize;
+        let record_count = self.get_record_count()?;
         if record_count == 0 {
             return Ok(None);
         }
-        let data = self.get_data()?;
-        for record_num in 0..record_count {
-            let offset = record_num * 36 + 4;
-            let name_data = &data[offset..offset + 32];
-            let mut blank_index = name_data.len() - 1;
-            for index in 0..name_data.len() {
-                if name_data[name_data.len() - index - 1] != 0u8 {
-                    blank_index = name_data.len() - index - 1;
-                    break;
-                }
-            }
-            let real_name_data = &name_data[0..blank_index + 1];
-            let local_name = String::from_utf8_lossy(real_name_data);
-            if local_name.to_string().eq(name) {
-                return Ok(Some(record_num as u32));
+        let source_name = name.as_bytes();
+        let read_name = [0u8; 32];
+        let read_root_id = [0u8; 4];
+
+        for record_num in 0..record_count as usize {
+            let name_offset = record_num * 36 + 4;
+            self.read_data(&mut read_name, name_offset, 32)?;
+            if source_name.eq(&read_name) {
+                self.read_data(&mut read_root_id, name_offset + 32, 4)?;
+                return Ok(Some(u32::from_le_bytes(read_root_id)));
             }
         }
+
         Ok(None)
     }
 }
 
 
-
 impl TablePage {
 
     ///LSN's offset in data
-    const LSN_OFFSET: usize = 4;
+    const OFFSET_LSN: usize = 4;
     /// table page's header end offset
     /// or slot arrays start offset
     const SIZE_TABLE_PAGE_HEADER: usize = 24;
@@ -251,63 +260,64 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn init(page_id: u32, page_size: usize, prev_page_id: u32) -> Result<TablePage> {
-        let page = Page {
-            page_id,
-            pin_count: 0,
-            is_dirty: false,
-            data: Arc::new(Mutex::new(vec![0u8; page_size])),
-        };
+    pub fn new(page_id: u32, page_size: u32, prev_page_id: Option<u32>) -> Result<TablePage> {
+        let page = Page::new()?;
         let mut table_page = TablePage { page };
 
         // init data, the page id can't changed
-        let page_id_vec = u32_to_vec(page_id)?;
-        table_page.set_data(&page_id_vec, 0, 4)?;
+        let page_id_data = page_id.to_le_bytes();
+        table_page.write_data(&page_id_data, 0, 4)?;
 
         table_page.set_tuple_count(0)?;
-        table_page.set_prev_page_id(prev_page_id)?;
-        table_page.set_free_space_pointer(page_size as u32)?;
+        if let Some(prev_id) = prev_page_id {
+            table_page.set_prev_page_id(prev_id)?;
+        }
+        table_page.set_free_space_pointer(page_size)?;
 
         Ok(table_page)
     }
 
     /// get lsn from table page
-    pub fn get_lsn(&self) -> u32 {
-        let data = &self.data[OFFSET_LSN..OFFSET_LSN + size_of::<u32>()];
-        let lsn_data:[u8; size_of::<u32>()] = <[u8; size_of::<u32>()]>::try_from(data).unwrap();
-        u32::from_ne_bytes(lsn_data)
+    pub fn get_lsn(&self) -> Result<u32> {
+        let lsn_data = [0u8; 4];
+        self.read_data(&mut lsn_data, TablePage::OFFSET_LSN, 4)?;
+        Ok(u32::from_ne_bytes(lsn_data))
     }
 
     /// return the page ID of this table page
     pub fn get_table_page_id(&self) -> Result<u32> {
-        let data = self.get_data()?;
-        vec_to_u32(&data, 0)
+        let page_id_data = [0u8; 4];
+        self.read_data(&mut page_id_data, 0, 4)?;
+        Ok(u32::from_le_bytes(page_id_data))
     }
 
     /// return the page ID of the previous table page
     pub fn get_prev_page_id(&self) -> Result<u32> {
-        let data = self.get_data()?;
-        vec_to_u32(&data, TablePage::OFFSET_PREV_PAGE_ID)
+        let prev_data = [0u8; 4];
+        self.read_data(&mut prev_data, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
+        Ok(u32::from_le_bytes(prev_data))
     }
 
     /// return the page ID of the next table page
     pub fn get_next_page_id(&self) -> Result<u32> {
-        let data = self.get_data()?;
-        vec_to_u32(&data, TablePage::OFFSET_NEXT_PAGE_ID)
+        let prev_data = [0u8; 4];
+        self.read_data(&mut prev_data, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
+        Ok(u32::from_le_bytes(prev_data))
     }
 
     /// set the page id of the previous page in the table
-    pub fn set_prev_page_id(&mut self, prev_page_id: u32) -> Result<bool> {
-        let new_vec = u32_to_vec(prev_page_id)?;
-        self.set_data(&new_vec, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
-        Ok(true)
+    pub fn set_prev_page_id(&mut self, prev_page_id: u32) -> Result<()> {
+        let prev_data = prev_page_id.to_le_bytes();
+        self.write_data(&prev_data, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
+        Ok(())
     }
 
     /// set the page id of the next page in the table
     pub fn set_next_page_id(&mut self, next_page_id: u32) -> Result<bool> {
-        let new_vec = u32_to_vec(next_page_id)?;
-        self.set_data(&new_vec, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
-        Ok(true)
+        let prev_data = prev_page_id.to_le_bytes();
+        self.write_data(&prev_data, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
+        Ok(())
+
     }
 
     /// insert a tuple into the page
