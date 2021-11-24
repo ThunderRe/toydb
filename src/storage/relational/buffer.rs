@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use crate::error::{Result, Error};
-use crate::serialization::ToVecAndByVec;
 use crate::storage::relational::DiskManager;
 use crate::storage::relational::page::{HeaderPage, PAGE_SIZE, TablePage};
 
@@ -15,45 +14,47 @@ impl BufferPoolManager {
 
     /// create a new BufferPoolManager by db_dir
     pub fn new(db_dir: &Path) -> Result<BufferPoolManager> {
-        let mut disk_manager = DiskManager::new(db_dir)?;
-        let mut header_page: HeaderPage;
-        if let Some(data) = disk_manager.read_page(0)? {
-            if let Some(header) = HeaderPage::by_vec(&data) {
-                header_page = header;
-            } else {
-                header_page = HeaderPage::new()?;
-                let data = HeaderPage::to_vec(&header_page);
-                disk_manager.write_page(0, data);
-            }
-        } else {
-            header_page = HeaderPage::new()?;
-            let data = HeaderPage::to_vec(&header_page);
-            disk_manager.write_page(0, data);
-        }
+        // let mut disk_manager = DiskManager::new(db_dir)?;
+        // let mut header_page: HeaderPage;
+        // if let Some(data) = disk_manager.read_page(0)? {
+        //     if let Some(header) = HeaderPage::by_vec(&data) {
+        //         header_page = header;
+        //     } else {
+        //         header_page = HeaderPage::new()?;
+        //         let data = HeaderPage::to_vec(&header_page);
+        //         disk_manager.write_page(0, data);
+        //     }
+        // } else {
+        //     header_page = HeaderPage::new()?;
+        //     let data = HeaderPage::to_vec(&header_page);
+        //     disk_manager.write_page(0, data);
+        // }
+        //
+        // let buffer_pool_manager = BufferPoolManager {
+        //     disk_manager: Arc::new(Mutex::new(disk_manager)),
+        //     header_page
+        // };
 
-        let buffer_pool_manager = BufferPoolManager {
-            disk_manager: Arc::new(Mutex::new(disk_manager)),
-            header_page
-        };
-
-        Ok(buffer_pool_manager)
+        // Ok(buffer_pool_manager)
+        todo!()
     }
 
     /// Fetch the requested page from the buffer pool
     pub fn fetch_page(&mut self, page_id: u32) -> Result<Option<TablePage>> {
-        if page_id.eq(&0) {
-            // can not read header page
-            return Ok(None);
-        }
-
-        let mut disk_manager = self.disk_manager.lock()?;
-        if let Some(page_data) = disk_manager.read_page(page_id)? {
-            if let Some(data) = TablePage::by_vec(&page_data) {
-                return Ok(Some(data));
-            }
-        }
-
-        Ok(None)
+        // if page_id.eq(&0) {
+        //     // can not read header page
+        //     return Ok(None);
+        // }
+        //
+        // let mut disk_manager = self.disk_manager.lock()?;
+        // if let Some(page_data) = disk_manager.read_page(page_id)? {
+        //     if let Some(data) = TablePage::by_vec(&page_data) {
+        //         return Ok(Some(data));
+        //     }
+        // }
+        //
+        // Ok(None)
+        todo!()
     }
 
     /// unpin the target page from the buffer pool
@@ -63,19 +64,19 @@ impl BufferPoolManager {
 
     /// flushes the target page to disk
     pub fn flush_page(&mut self, page_id: u32) -> Result<bool> {
-        if page_id.eq(&0) {
-            return Ok(false);
-        }
+        // if page_id.eq(&0) {
+        //     return Ok(false);
+        // }
         todo!()
     }
 
     /// creates a new page in the buffer pool
     pub fn new_page(&mut self, page_id: u32) -> Result<TablePage> {
         // first we should init
-        if page_id.eq(&0) {
-            return Err(Error::Value(String::from("can't create page, because page_id can't equals 0")));
-        }
-        TablePage::init(page_id, PAGE_SIZE, page_id - 1);
+        // if page_id.eq(&0) {
+        //     return Err(Error::Value(String::from("can't create page, because page_id can't equals 0")));
+        // }
+        // TablePage::init(page_id, PAGE_SIZE, page_id - 1);
 
         todo!()
     }

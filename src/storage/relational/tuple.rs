@@ -14,16 +14,15 @@ impl Tuple {
         Tuple { data: Vec::new(), rid: None, allocated: false}
     }
 
-    pub fn from_data(data: &[u8]) -> Tuple {
-        let vec = Vec::from(data);
-        Tuple { data: vec, rid: None, allocated: false}
+    pub fn from_data(data: Vec<u8>) -> Tuple {
+        Tuple { data, rid: None, allocated: false}
     }
 
     pub fn get_data(&self) -> &[u8] {
         &self.data
     }
 
-    pub fn get_data_mut(&self) -> &mut [u8] {
+    pub fn get_data_mut(&mut self) -> &mut [u8] {
         &mut self.data
     }
 
