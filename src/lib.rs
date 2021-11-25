@@ -8,7 +8,6 @@ pub mod raft;
 pub mod server;
 pub mod sql;
 pub mod storage;
-pub mod serialization;
 
 pub use client::Client;
 pub use server::Server;

@@ -2,7 +2,9 @@ use crate::error::{Error, Result};
 use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
+use std::str;
 use super::tuple::RID;
+
 
 /// 每个Page的固定大小：4KB
 pub const PAGE_SIZE: usize = 4095;
@@ -61,7 +63,7 @@ impl Page {
 
     /// read data from page
     pub fn read_data(&self, data: &mut [u8], offset: usize, len: usize) -> Result<usize> {
-        if offset > data.len() {
+        if offset > self.data.len() {
             return Err(Error::Value("offset is out of range".to_string()));
         }
         let mut end = offset + len;
@@ -79,7 +81,7 @@ impl Page {
 
     /// write data to page
     pub fn write_data(&mut self, data: &[u8], offset: usize, len: usize) -> Result<usize> {
-        if offset > data.len() {
+        if offset > self.data.len() {
             return Err(Error::Value("offset is out of range".to_string()));
         }
         let mut end = offset + len;
@@ -128,7 +130,7 @@ impl HeaderPage {
             return Ok(false);
         }
         // check for duplicate name
-        if let Some(_) = self.find_record(name)? {
+        if self.find_record_num(name)?.is_some() {
             return Ok(false);
         }
         let record_count = self.get_record_count()?;
@@ -154,7 +156,7 @@ impl HeaderPage {
             return Ok(false);
         }
 
-        if let Some(record_num) = self.find_record(name)? {
+        if let Some(record_num) = self.find_record_num(name)? {
             // the record start offset
             let offset = record_num as usize * 36 + 4;
             // find need move data len
@@ -171,7 +173,7 @@ impl HeaderPage {
     }
 
     pub fn update_record(&mut self, name: &str, root_id: u32) -> Result<bool> {
-        if let Some(record_num) = self.find_record(name)? {
+        if let Some(record_num) = self.find_record_num(name)? {
             let offset = record_num as usize * 36 + 4;
             let root_id_data = root_id.to_le_bytes();
             self.write_data(&root_id_data, offset, 4)?;
@@ -182,7 +184,7 @@ impl HeaderPage {
 
     /// return root if success
     pub fn get_root_id(&self, name: &str) -> Result<Option<u32>> {
-        if let Some(record_num) = self.find_record(name)? {
+        if let Some(record_num) = self.find_record_num(name)? {
             let offset = record_num as usize * 36 + 4 + 32;
             let mut root_id_data = [0u8; 4];
             self.read_data(&mut root_id_data, offset, 4)?;
@@ -203,7 +205,7 @@ impl HeaderPage {
         Ok(())
     }
 
-    fn find_record(&self, name: &str) -> Result<Option<u32>> {
+    fn find_record_num(&self, name: &str) -> Result<Option<u32>> {
         if name.len() > 32 {
             return Ok(None);
         }
@@ -211,19 +213,17 @@ impl HeaderPage {
         if record_count == 0 {
             return Ok(None);
         }
-        let source_name = name.as_bytes();
-        let mut read_name = [0u8; 32];
-        let mut read_root_id = [0u8; 4];
 
         for record_num in 0..record_count as usize {
+            let mut read_name = [0u8; 32];
             let name_offset = record_num * 36 + 4;
             self.read_data(&mut read_name, name_offset, 32)?;
-            if source_name.eq(&read_name) {
-                self.read_data(&mut read_root_id, name_offset + 32, 4)?;
-                return Ok(Some(u32::from_le_bytes(read_root_id)));
+            let mut real_name = str::from_utf8(&read_name).unwrap();
+            real_name = real_name.trim_end_matches(|c| c == '\0');
+            if real_name.eq(name) {
+                return Ok(Some(record_num as u32));
             }
         }
-
         Ok(None)
     }
 }
