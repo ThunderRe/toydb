@@ -2,25 +2,16 @@ use crate::error::Result;
 use crate::storage::relational::page::HeaderPage;
 
 struct Record {
-    record_name : &'static str,
-    root_id: u32
+    record_name: &'static str,
+    root_id: u32,
 }
 
 #[test]
 fn test_header_page() -> Result<()> {
     let records = [
-        Record {
-            record_name: "a",
-            root_id: 1,
-        },
-        Record {
-            record_name: "b",
-            root_id: 2,
-        },
-        Record {
-            record_name: "c",
-            root_id: 3,
-        }
+        Record { record_name: "a", root_id: 1 },
+        Record { record_name: "b", root_id: 2 },
+        Record { record_name: "c", root_id: 3 },
     ];
     let mut header_page = HeaderPage::new()?;
     let record_size = records.len() as u32;

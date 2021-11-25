@@ -1,12 +1,12 @@
+use super::clock_replacer::ClockStatus;
+use super::tuple::RID;
 use crate::error::{Error, Result};
 use crate::storage::relational::tuple::Tuple;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::str;
-use super::tuple::RID;
 
-
-/// 每个Page的固定大小：4KB
+/// Page size: 4KB
 pub const PAGE_SIZE: usize = 4095;
 
 /// the data page, we have to implement
@@ -49,16 +49,12 @@ pub struct HeaderPage {
 ///  /--------------------------------------------------------------
 pub struct TablePage {
     page: Page,
+    status: ClockStatus,
 }
 
 impl Page {
     pub fn new() -> Result<Page> {
-        Ok(Page {
-            data: [0u8; PAGE_SIZE],
-            page_id: 0,
-            pin_count: 0,
-            is_dirty: false,
-        })
+        Ok(Page { data: [0u8; PAGE_SIZE], page_id: 0, pin_count: 0, is_dirty: false })
     }
 
     /// read data from page
@@ -111,15 +107,11 @@ impl Page {
     pub fn is_dirty(&self) -> &bool {
         &self.is_dirty
     }
-
 }
 
 impl HeaderPage {
-
     pub fn new() -> Result<HeaderPage> {
-        let mut header_page = HeaderPage {
-            page : Page::new()?
-        };
+        let mut header_page = HeaderPage { page: Page::new()? };
         header_page.set_record_count(0);
         Ok(header_page)
     }
@@ -228,9 +220,7 @@ impl HeaderPage {
     }
 }
 
-
 impl TablePage {
-
     ///LSN's offset in data
     const OFFSET_LSN: usize = 4;
     /// table page's header end offset
@@ -258,7 +248,9 @@ impl TablePage {
     /// prev_page_id: the previous table page ID
     pub fn new(page_id: u32, page_size: u32, prev_page_id: Option<u32>) -> Result<TablePage> {
         let page = Page::new()?;
-        let mut table_page = TablePage { page };
+        let mut table_page = TablePage { page, status: ClockStatus::empty() };
+        // used = true, when page created
+        table_page.status.used();
 
         // init data, the page id can't changed
         let page_id_data = page_id.to_le_bytes();
@@ -274,28 +266,32 @@ impl TablePage {
     }
 
     /// get lsn from table page
-    pub fn get_lsn(&self) -> Result<u32> {
+    pub fn get_lsn(&mut self) -> Result<u32> {
+        self.status.used();
         let mut lsn_data = [0u8; 4];
         self.read_data(&mut lsn_data, TablePage::OFFSET_LSN, 4)?;
         Ok(u32::from_ne_bytes(lsn_data))
     }
 
     /// return the page ID of this table page
-    pub fn get_table_page_id(&self) -> Result<u32> {
+    pub fn get_table_page_id(&mut self) -> Result<u32> {
+        self.status.used();
         let mut page_id_data = [0u8; 4];
         self.read_data(&mut page_id_data, 0, 4)?;
         Ok(u32::from_le_bytes(page_id_data))
     }
 
     /// return the page ID of the previous table page
-    pub fn get_prev_page_id(&self) -> Result<u32> {
+    pub fn get_prev_page_id(&mut self) -> Result<u32> {
+        self.status.used();
         let mut prev_data = [0u8; 4];
         self.read_data(&mut prev_data, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
         Ok(u32::from_le_bytes(prev_data))
     }
 
     /// return the page ID of the next table page
-    pub fn get_next_page_id(&self) -> Result<u32> {
+    pub fn get_next_page_id(&mut self) -> Result<u32> {
+        self.status.used();
         let mut prev_data = [0u8; 4];
         self.read_data(&mut prev_data, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
         Ok(u32::from_le_bytes(prev_data))
@@ -303,6 +299,7 @@ impl TablePage {
 
     /// set the page id of the previous page in the table
     pub fn set_prev_page_id(&mut self, prev_page_id: u32) -> Result<()> {
+        self.status.edited();
         let prev_data = prev_page_id.to_le_bytes();
         self.write_data(&prev_data, TablePage::OFFSET_PREV_PAGE_ID, 4)?;
         Ok(())
@@ -310,10 +307,10 @@ impl TablePage {
 
     /// set the page id of the next page in the table
     pub fn set_next_page_id(&mut self, next_page_id: u32) -> Result<()> {
+        self.status.edited();
         let next_page = next_page_id.to_le_bytes();
         self.write_data(&next_page, TablePage::OFFSET_NEXT_PAGE_ID, 4)?;
         Ok(())
-
     }
 
     /// insert a tuple into the page
@@ -349,6 +346,7 @@ impl TablePage {
         let rid = RID::new(*self.get_page_id(), slot_num);
         tuple.set_rid(rid);
         tuple.allocated();
+        self.status.edited();
         Ok(true)
     }
 
@@ -367,6 +365,8 @@ impl TablePage {
         if tuple_size > 0 {
             self.set_tuple_size(slot_num, TablePage::set_deleted_flag(tuple_size as u32))?;
         }
+
+        self.status.edited();
         Ok(true)
     }
 
@@ -398,16 +398,20 @@ impl TablePage {
         self.set_free_space_pointer(free_space_pointer + tuple_size as u32)?;
 
         // move data
-        self.data.copy_within(free_space_pointer as usize..tuple_offset as usize, (free_space_pointer + tuple_size) as usize);
+        self.data.copy_within(
+            free_space_pointer as usize..tuple_offset as usize,
+            (free_space_pointer + tuple_size) as usize,
+        );
 
         // update slot
         for slot_num_i in 0..self.get_tuple_count()? {
             let tuple_offset_i = self.get_tuple_offset_at_slot(slot_num_i)?;
             if tuple_offset_i < tuple_offset {
-                self.set_tuple_offset_at_slot(slot_num_i, tuple_offset_i + tuple_size)?;   
+                self.set_tuple_offset_at_slot(slot_num_i, tuple_offset_i + tuple_size)?;
             }
         }
 
+        self.status.edited();
         Ok(())
     }
 
@@ -416,11 +420,10 @@ impl TablePage {
     /// old_tuple: old value of the tuple
     /// rid: rid of the tuple
     /// although we only need to change the data of the tuple, we need to wrap it with a tuple object when passing it.
-    pub fn update_tuple(
-        &mut self,
-        tuple: &Tuple,
-    ) -> Result<()> {
-        let rid = tuple.get_rid().ok_or(Error::Value(String::from("The tuple has not rid when update!!")))?;
+    pub fn update_tuple(&mut self, tuple: &Tuple) -> Result<()> {
+        let rid = tuple
+            .get_rid()
+            .ok_or(Error::Value(String::from("The tuple has not rid when update!!")))?;
         let new_tuple_size = tuple.get_length();
         let slot_num = *rid.get_slot_num();
 
@@ -450,20 +453,32 @@ impl TablePage {
         }
 
         // move the before data of the tuple_offset,to make room for the new tuple
-        self.data.copy_within(free_space_pointer..tuple_offset, free_space_pointer + tuple_size as usize - new_tuple_size);
+        self.data.copy_within(
+            free_space_pointer..tuple_offset,
+            free_space_pointer + tuple_size as usize - new_tuple_size,
+        );
 
         // update free space pointer
-        self.set_free_space_pointer((free_space_pointer + tuple_size as usize - new_tuple_size) as u32)?;
+        self.set_free_space_pointer(
+            (free_space_pointer + tuple_size as usize - new_tuple_size) as u32,
+        )?;
 
         // update tuple data
         let update_data = tuple.get_data();
-        self.write_data(update_data, tuple_offset + tuple_size as usize - new_tuple_size, new_tuple_size)?;
+        self.write_data(
+            update_data,
+            tuple_offset + tuple_size as usize - new_tuple_size,
+            new_tuple_size,
+        )?;
 
         // update all tuple offset
         for slot_num_i in 0..self.get_tuple_count()? {
             let slot_offset_i = self.get_tuple_offset_at_slot(slot_num_i)?;
             if slot_offset_i < tuple_offset as u32 {
-                self.set_tuple_offset_at_slot(slot_num_i, slot_offset_i + tuple_size - new_tuple_size as u32)?;
+                self.set_tuple_offset_at_slot(
+                    slot_num_i,
+                    slot_offset_i + tuple_size - new_tuple_size as u32,
+                )?;
             }
         }
 
@@ -474,9 +489,9 @@ impl TablePage {
         )?;
         self.set_tuple_size(slot_num, new_tuple_size as u32)?;
 
+        self.status.edited();
         Ok(())
     }
-
 
     /// to be called on abort.
     /// Rollback a delete,
@@ -491,13 +506,13 @@ impl TablePage {
         if TablePage::is_deleted(tuple_size) {
             self.set_tuple_size(slot_num, TablePage::unset_deleted_flag(tuple_size))?;
         }
-
+        self.status.edited();
         Ok(())
     }
 
     /// read a tuple from a table
     /// rid: rid of the tuple to read
-    pub fn get_tuple(&self, rid: &RID) -> Result<Option<Tuple>> {
+    pub fn get_tuple(&mut self, rid: &RID) -> Result<Option<Tuple>> {
         let page_id = *self.get_page_id();
         if page_id != *rid.get_page_id() {
             return Err(Error::Value(String::from("the page id is not include this page")));
@@ -519,12 +534,12 @@ impl TablePage {
         let mut tuple = Tuple::from_data(tuple_data);
         tuple.set_rid(tuple_rid);
         tuple.allocated();
-
+        self.status.used();
         Ok(Some(tuple))
     }
 
     /// return the first tuple if exists
-    pub fn get_first_tuple_rid(&self) -> Result<Option<RID>> {
+    pub fn get_first_tuple_rid(&mut self) -> Result<Option<RID>> {
         let tuple_count = self.get_tuple_count()?;
         if tuple_count == 0 {
             return Ok(None);
@@ -535,6 +550,7 @@ impl TablePage {
             let tuple_size = self.get_tuple_size(slot_num)?;
             if !TablePage::is_deleted(tuple_size) {
                 let rid = RID::new(page_id, slot_num);
+                self.status.used();
                 return Ok(Some(rid));
             }
         }
@@ -543,10 +559,12 @@ impl TablePage {
 
     /// return the next tuple exists
     /// cur_rid: the RID of the current tuple
-    pub fn get_next_tuple_rid(&self, cur_rid: &RID) -> Result<Option<RID>> {
+    pub fn get_next_tuple_rid(&mut self, cur_rid: &RID) -> Result<Option<RID>> {
         let page_id = *self.get_page_id();
         if !page_id.eq(cur_rid.get_page_id()) {
-            return Err(Error::Value(String::from("this page id was not equals page_id in this cur_rid")));
+            return Err(Error::Value(String::from(
+                "this page id was not equals page_id in this cur_rid",
+            )));
         }
 
         let slot_num = *cur_rid.get_slot_num();
@@ -554,11 +572,17 @@ impl TablePage {
             let tuple_size = self.get_tuple_size(slot_num_i)?;
             if !TablePage::is_deleted(tuple_size) {
                 let rid = RID::new(page_id, slot_num_i);
+                self.status.edited();
                 return Ok(Some(rid));
             }
         }
 
         Ok(None)
+    }
+
+    /// get the ClockStatus from the table page to edit by ClockReplacer
+    pub fn get_status_mut(&mut self) -> &mut ClockStatus {
+        &mut self.status
     }
 
     /// foreach slot array we haved, if tuple_size equals 0,
@@ -616,28 +640,44 @@ impl TablePage {
     /// slot_num start from 0
     fn get_tuple_offset_at_slot(&self, slot_num: u32) -> Result<u32> {
         let mut offset = [0u8; 4];
-        self.read_data(&mut offset, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize, 4)?;
+        self.read_data(
+            &mut offset,
+            TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize,
+            4,
+        )?;
         Ok(u32::from_le_bytes(offset))
     }
 
     /// set tuple offset at slot slot_num
     fn set_tuple_offset_at_slot(&mut self, slot_num: u32, offset: u32) -> Result<()> {
         let offset_data = offset.to_le_bytes();
-        self.write_data(&offset_data, TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize, 4)?;
+        self.write_data(
+            &offset_data,
+            TablePage::OFFSET_TUPLE_OFFSET + TablePage::SIZE_TUPLE * slot_num as usize,
+            4,
+        )?;
         Ok(())
     }
 
     /// return tuple size at slot slot_num
     fn get_tuple_size(&self, slot_num: u32) -> Result<u32> {
         let mut tuple_size = [0u8; 4];
-        self.read_data(&mut tuple_size, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize, 4)?;
+        self.read_data(
+            &mut tuple_size,
+            TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize,
+            4,
+        )?;
         Ok(u32::from_le_bytes(tuple_size))
     }
 
     /// set tuple size at slot slot_num
     fn set_tuple_size(&mut self, slot_num: u32, size: u32) -> Result<()> {
         let tuple_size = size.to_le_bytes();
-        self.write_data(&tuple_size, TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize, 4)?;
+        self.write_data(
+            &tuple_size,
+            TablePage::OFFSET_TUPLE_SIZE + TablePage::SIZE_TUPLE * slot_num as usize,
+            4,
+        )?;
         Ok(())
     }
 

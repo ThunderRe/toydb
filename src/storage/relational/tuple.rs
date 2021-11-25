@@ -1,7 +1,7 @@
 pub struct Tuple {
     data: Vec<u8>,
     rid: Option<RID>,
-    allocated: bool
+    allocated: bool,
 }
 
 pub struct RID {
@@ -11,11 +11,11 @@ pub struct RID {
 
 impl Tuple {
     pub fn empty() -> Tuple {
-        Tuple { data: Vec::new(), rid: None, allocated: false}
+        Tuple { data: Vec::new(), rid: None, allocated: false }
     }
 
     pub fn from_data(data: Vec<u8>) -> Tuple {
-        Tuple { data, rid: None, allocated: false}
+        Tuple { data, rid: None, allocated: false }
     }
 
     pub fn get_data(&self) -> &[u8] {
@@ -50,16 +50,11 @@ impl Tuple {
     pub fn allocated(&mut self) {
         self.allocated = true;
     }
-
-
 }
 
 impl RID {
     pub fn new(page_id: u32, slot_num: u32) -> RID {
-        RID {
-            page_id,
-            slot_num
-        }
+        RID { page_id, slot_num }
     }
 
     pub fn get_page_id(&self) -> &u32 {
@@ -69,6 +64,4 @@ impl RID {
     pub fn get_slot_num(&self) -> &u32 {
         &self.slot_num
     }
-
-
 }
