@@ -1,23 +1,29 @@
-use super::rid::RID;
-
 pub struct Tuple {
     data: Vec<u8>,
     rid: Option<RID>,
-    allocated: bool, // allocated memory
+    allocated: bool
+}
+
+pub struct RID {
+    page_id: u32,
+    slot_num: u32,
 }
 
 impl Tuple {
     pub fn empty() -> Tuple {
-        Tuple { data: Vec::new(), rid: None, allocated: false }
+        Tuple { data: Vec::new(), rid: None, allocated: false}
     }
 
-    pub fn new(data: Vec<u8>, rid: RID) -> Tuple {
-        Tuple { data, rid: Some(rid), allocated: true }
+    pub fn from_data(data: Vec<u8>) -> Tuple {
+        Tuple { data, rid: None, allocated: false}
     }
 
-    /// Get the data of this tuple in the table's backing store
-    pub fn get_data(&self) -> &Vec<u8> {
+    pub fn get_data(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn get_data_mut(&mut self) -> &mut [u8] {
+        &mut self.data
     }
 
     /// return RID of current tuple
@@ -28,8 +34,41 @@ impl Tuple {
         }
     }
 
+    pub fn set_rid(&mut self, rid: RID) -> bool {
+        if let Some(_) = self.rid {
+            return false;
+        }
+        self.rid = Some(rid);
+        true
+    }
+
     /// Get length of the tuple
     pub fn get_length(&self) -> usize {
         self.data.len()
     }
+
+    pub fn allocated(&mut self) {
+        self.allocated = true;
+    }
+
+
+}
+
+impl RID {
+    pub fn new(page_id: u32, slot_num: u32) -> RID {
+        RID {
+            page_id,
+            slot_num
+        }
+    }
+
+    pub fn get_page_id(&self) -> &u32 {
+        &self.page_id
+    }
+
+    pub fn get_slot_num(&self) -> &u32 {
+        &self.slot_num
+    }
+
+
 }

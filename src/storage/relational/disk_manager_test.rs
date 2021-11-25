@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::storage::relational::page::PAGE_SIZE;
 use crate::storage::relational::DiskManager;
-use std::option::Option::Some;
 
 #[test]
 fn test_page() -> Result<()> {
