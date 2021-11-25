@@ -35,5 +35,6 @@ fn test_header_page() -> Result<()> {
             assert_eq!(root_id, record.root_id);
         }
     }
+
     Ok(())
 }
