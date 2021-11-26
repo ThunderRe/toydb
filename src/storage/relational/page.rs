@@ -246,7 +246,7 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn new(page_id: u32, page_size: u32, prev_page_id: Option<u32>) -> Result<TablePage> {
+    pub fn new(page_id: u32, prev_page_id: Option<u32>) -> Result<TablePage> {
         let page = Page::new()?;
         let mut table_page = TablePage { page, status: ClockStatus::empty() };
         // used = true, when page created
@@ -260,7 +260,7 @@ impl TablePage {
         if let Some(prev_id) = prev_page_id {
             table_page.set_prev_page_id(prev_id)?;
         }
-        table_page.set_free_space_pointer(page_size)?;
+        table_page.set_free_space_pointer(PAGE_SIZE as u32)?;
 
         Ok(table_page)
     }
@@ -679,6 +679,10 @@ impl TablePage {
             4,
         )?;
         Ok(())
+    }
+
+    pub fn get_data(&self) -> &[u8] {
+        &self.data
     }
 
     /// return true if the tuple is deleted or empty

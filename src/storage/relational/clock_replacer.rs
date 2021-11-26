@@ -42,8 +42,8 @@ impl ClockStatus {
         self.used = false;
     }
 
-    pub fn un_edited(&mut self) {
-        self.edited = false;
+    pub fn is_edited(&self) -> bool {
+        self.edited.clone()
     }
 
     pub fn level(&self) -> ExpelLevel {
@@ -87,14 +87,17 @@ impl ClockReplacer {
         Ok(None)
     }
 
-    pub fn push(&mut self, page: TablePage) -> Result<()> {
+    /// push a new page. if a page should be remove, return it
+    pub fn push(&mut self, page: TablePage) -> Result<Option<Arc<Mutex<TablePage>>>> {
         let push_page = Arc::new(Mutex::new(page));
         if let Some(index) = self.check_hand()? {
-            self.pages[index] = push_page;
+            let remove_page = self.pages.remove(index);
+            self.pages.insert(index, push_page);
+            return Ok(Some(remove_page));
         } else {
             self.pages.push(push_page);
         }
-        Ok(())
+        Ok(None)
     }
 
     /// clockwise!!!
