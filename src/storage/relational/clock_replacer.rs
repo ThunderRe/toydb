@@ -1,148 +1,188 @@
-use crate::error::Result;
+use super::page::TablePage;
+use crate::error::{Error, Result};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::option::Option::Some;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
-/// Replacer 实现了时钟替换策略，它近似于最近最少使用的策略
-pub trait Replacer {
-    /// 从时钟指针的当前位置开始，找到在`ClockReplacer` 中并且其ref 标志设置为false 的第一帧。
-    /// 如果一个帧在 `ClockReplacer` 中，但它的 ref 标志设置为 true，请将其更改为 false。
-    /// 这应该是更新时钟指针的唯一方法。
-    fn victim(&mut self, frame_id: u32) -> Result<bool>;
-
-    /// 在将页面固定到 BufferPoolManager 中的框架后，应调用此方法。
-    /// 它应该从 ClockReplacer 中删除包含固定页面的框架。
-    fn pin(&mut self, frame_id: &u32) -> Result<()>;
-
-    /// 当页面的 pin_count 变为 0 时，应调用此方法。
-    /// 此方法应将包含未固定页面的框架添加到 ClockReplacer。
-    fn un_pin(&mut self, frame_id: &u32) -> Result<()>;
-
-    /// 此方法返回当前在 ClockReplacer 中的帧数。
-    fn size(&mut self) -> usize;
-}
-
-#[derive(Clone, Debug)]
-struct Frame {
-    flag: bool,
-    // 引用计数
-    ref_count: u32,
-    page_id: u32,
-}
-
+/// Cache Page, and decide on page replacement behavior
 pub struct ClockReplacer {
-    queue: Vec<Frame>,
-    map: HashMap<u32, usize>,
-    size: usize,
+    clock_hand: u32,
+    pages: Vec<Arc<Mutex<TablePage>>>,
+    capacity: u32,
+}
+
+#[derive(Eq, Hash, PartialEq)]
+pub enum ExpelLevel {
+    HIGH,
+    NORMAL,
+    MEDIUM,
+    LOW,
+}
+
+pub struct ClockStatus {
+    used: bool,
+    edited: bool,
+}
+
+impl ClockStatus {
+    pub fn empty() -> ClockStatus {
+        ClockStatus { used: false, edited: false }
+    }
+
+    pub fn used(&mut self) {
+        self.used = true;
+    }
+
+    pub fn edited(&mut self) {
+        self.edited = true;
+    }
+
+    pub fn un_used(&mut self) {
+        self.used = false;
+    }
+
+    pub fn un_edited(&mut self) {
+        self.edited = false;
+    }
+
+    pub fn level(&self) -> ExpelLevel {
+        ExpelLevel::from(&self)
+    }
+}
+
+impl ExpelLevel {
+    pub fn from(clock_status: &ClockStatus) -> ExpelLevel {
+        return if !clock_status.used && !clock_status.edited {
+            ExpelLevel::HIGH
+        } else if clock_status.used && !clock_status.edited {
+            ExpelLevel::NORMAL
+        } else if !clock_status.used && clock_status.edited {
+            ExpelLevel::MEDIUM
+        } else {
+            ExpelLevel::LOW
+        };
+    }
 }
 
 impl ClockReplacer {
-    pub fn new(size: u32) -> Result<Self> {
-        Ok(ClockReplacer { queue: Vec::new(), map: HashMap::new(), size: size as usize })
-    }
-
-    /// 进行一次扫描
-    fn scan(&mut self) {
-        for frame in self.queue.iter_mut() {
-            if frame.ref_count.eq(&0) {
-                frame.flag = false;
-            }
+    pub fn new(capacity: u32) -> Result<ClockReplacer> {
+        if capacity == 0 {
+            return Err(Error::Value(String::from("capacity can't be zero!")));
         }
+        Ok(ClockReplacer { clock_hand: 0, pages: Vec::new(), capacity })
     }
 
-    /// 移除某个page_id对应的frame
-    fn remove(&mut self, page_id: &u32) {
-        if let Some(queue_index) = self.map.get(page_id) {
-            self.queue.remove(*queue_index);
-            self.map.remove(page_id);
-
-            self.flush_index();
+    pub fn poll(&self, page_id: u32) -> Result<Option<Arc<Mutex<TablePage>>>> {
+        let pages = &self.pages;
+        let mut filter_page = pages
+            .iter()
+            .filter(|p| page_id.eq(p.lock().unwrap().get_page_id()))
+            .collect::<Vec<_>>();
+        if let Some(page) = filter_page.get_mut(0) {
+            let page_rc = Arc::clone(page);
+            return Ok(Some(page_rc));
         }
+
+        Ok(None)
     }
 
-    /// 刷新缓存
-    fn flush_index(&mut self) {
-        self.map.clear();
-        for (index, frame) in self.queue.iter().enumerate() {
-            self.map.insert(frame.page_id, Clone::clone(&index));
-        }
-    }
-
-    /// 添加某个frame
-    fn add(&mut self, page_id: u32) -> Result<()> {
-        let frame = Frame { flag: true, ref_count: 0, page_id };
-        self.queue.push(frame);
-        for (queue_index, frame) in self.queue.iter().enumerate() {
-            if frame.page_id == page_id {
-                self.map.insert(page_id, queue_index);
-            }
+    pub fn push(&mut self, page: TablePage) -> Result<()> {
+        let push_page = Arc::new(Mutex::new(page));
+        if let Some(index) = self.check_hand()? {
+            self.pages[index] = push_page;
+        } else {
+            self.pages.push(push_page);
         }
         Ok(())
     }
 
-    // fn find(&mut self, page_id: &u32) -> Option<&Frame> {
-    //     if let Some(queue_index) = self.map.get(page_id) {
-    //         return self.queue.get(*queue_index);
-    //     }
-    //     None
-    // }
-
-    fn find_mut(&mut self, page_id: &u32) -> Option<&mut Frame> {
-        if let Some(queue_index) = self.map.get(page_id) {
-            return self.queue.get_mut(*queue_index);
+    /// clockwise!!!
+    /// return:
+    ///     None - There is still space, push directly
+    ///     Some - The cache is full, turn the clock hand and find the page to be removed
+    fn check_hand(&mut self) -> Result<Option<usize>> {
+        if self.capacity as usize > self.pages.len() {
+            return Ok(None);
         }
-        None
-    }
 
-    /// 寻找一个能够被移除的Frame Id,并将其移除
-    fn try_remove(&mut self) -> Result<bool> {
-        if self.size() < self.size {
-            return Ok(true);
-        }
-        self.scan();
-        for (key, value) in self.map.clone().iter() {
-            if let Some(frame) = self.queue.get(*value) {
-                if !frame.flag {
-                    self.remove(key);
-                    return Ok(true);
+        let mut remove_index: Option<usize> = None;
+        let mut loop_counter = 0;
+        let mut have_err = false;
+
+        loop {
+            if loop_counter >= 4 {
+                have_err = true;
+                break;
+            }
+            let group_map = self.group_by_level();
+            if let Some(high) = group_map.get(&ExpelLevel::HIGH) {
+                if let Some(index) = high.get(0) {
+                    self.clock_hand = *index;
+                    remove_index = Some(*index as usize);
+                    break;
                 }
             }
+            if let Some(normal) = group_map.get(&ExpelLevel::NORMAL) {
+                if let Some(index) = normal.get(0) {
+                    self.clock_hand = *index;
+                    remove_index = Some(*index as usize);
+                    break;
+                }
+            }
+            if let Some(medium) = group_map.get(&ExpelLevel::MEDIUM) {
+                if let Some(index) = medium.get(0) {
+                    self.clock_hand = *index;
+                    remove_index = Some(*index as usize);
+                    break;
+                }
+            }
+
+            self.clockwise();
+
+            // we should not remove pages of this level
+            // if let Some(low) = group_map.get(&ExpelLevel::LOW) {
+            //     if let Some(index) = low.get(0) {
+            //         self.clock_hand = *index;
+            //         remove_index = Some(*index as usize);
+            //         return Ok(Some(*index as usize));
+            //     }
+            // }
+            loop_counter += 1;
         }
 
-        Ok(false)
+        if have_err {
+            return Err(Error::Value(String::from(
+                "Clock Replacer can not find any page by remove memory",
+            )));
+        }
+        Ok(remove_index)
     }
 
-}
+    fn group_by_level(&self) -> HashMap<ExpelLevel, Vec<u32>> {
+        let mut result_map: HashMap<ExpelLevel, Vec<u32>> = HashMap::new();
+        let mut index: u32 = 0;
+        for page in &self.pages {
+            let mut table_page = page.lock().unwrap();
+            let level = table_page.get_status_mut().level();
 
-impl Replacer for ClockReplacer {
-    fn victim(&mut self, frame_id: u32) -> Result<bool> {
-        if let Some(frame) = self.find_mut(&frame_id) {
-            frame.flag = true;
-            return Ok(true);
-        } else if !self.try_remove()? {
-            return Ok(false);
+            if let Some(value) = result_map.get_mut(&level) {
+                value.push(index);
+            } else {
+                let list = vec![index];
+                result_map.insert(level, list);
+            }
         }
-
-        if self.size() < self.size {
-            self.add(frame_id)?;
-        }
-        Ok(false)
+        result_map
     }
 
-    fn pin(&mut self, frame_id: &u32) -> Result<()> {
-        if let Some(frame) = self.find_mut(frame_id) {
-            frame.ref_count += 1;
+    /// clockwise to clear used tag
+    fn clockwise(&self) {
+        let pages = &self.pages;
+        for page in pages {
+            let arc_page = Arc::clone(page);
+            let mut mutex_page = arc_page.lock().unwrap();
+            mutex_page.get_status_mut().un_used();
         }
-        Ok(())
-    }
-
-    fn un_pin(&mut self, frame_id: &u32) -> Result<()> {
-        if let Some(frame) = self.find_mut(frame_id) {
-            frame.ref_count -= 1;
-        }
-        Ok(())
-    }
-
-    fn size(&mut self) -> usize {
-        self.map.len()
     }
 }
