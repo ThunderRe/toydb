@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use super::clock_replacer::ClockStatus;
 use super::tuple::RID;
 use crate::error::{Error, Result};
@@ -41,7 +42,7 @@ pub struct HeaderPage {
 /// Header format (size in bytes):
 ///
 ///  /--------------------------------------------------------------------------
-/// | PageId (4)| LSN (4)| PrevPageId (4)| NextPageId (4)| FreeSpacePointer(4) |
+/// | PageId (4)| Deleted (1)| LSN (4)| PrevPageId (4)| NextPageId (4)| FreeSpacePointer(4) |
 ///  /--------------------------------------------------------------------------
 ///
 ///  /--------------------------------------------------------------
@@ -53,8 +54,8 @@ pub struct TablePage {
 }
 
 impl Page {
-    pub fn new() -> Result<Page> {
-        Ok(Page { data: [0u8; PAGE_SIZE], page_id: 0, pin_count: 0, is_dirty: false })
+    pub fn new(page_id: u32, data: [u8; PAGE_SIZE]) -> Result<Page> {
+        Ok(Page { data, page_id, pin_count: 0, is_dirty: false })
     }
 
     /// read data from page
@@ -110,8 +111,8 @@ impl Page {
 }
 
 impl HeaderPage {
-    pub fn new() -> Result<HeaderPage> {
-        let mut header_page = HeaderPage { page: Page::new()? };
+    pub fn new(data: [u8; PAGE_SIZE]) -> Result<HeaderPage> {
+        let mut header_page = HeaderPage { page: Page::new(0, data)? };
         header_page.set_record_count(0);
         Ok(header_page)
     }
@@ -221,33 +222,38 @@ impl HeaderPage {
 }
 
 impl TablePage {
-    ///LSN's offset in data
-    const OFFSET_LSN: usize = 4;
+
     /// table page's header end offset
     /// or slot arrays start offset
-    const SIZE_TABLE_PAGE_HEADER: usize = 24;
+    const SIZE_TABLE_PAGE_HEADER: usize = 25;
 
     /// one tuple meta data size in slot array,
     /// include tuple offset and tuple size
     const SIZE_TUPLE: usize = 8;
 
-    const OFFSET_PREV_PAGE_ID: usize = 8;
-    const OFFSET_NEXT_PAGE_ID: usize = 12;
-    const OFFSET_FREE_SPACE: usize = 16;
-    const OFFSET_TUPLE_COUNT: usize = 20;
-    const OFFSET_TUPLE_OFFSET: usize = 24;
+    /// Deleted flag offset, this size just one byte
+    const OFFSET_DELETED: usize = 4;
+    const OFFSET_LSN: usize = 5;
+    const OFFSET_PREV_PAGE_ID: usize = 9;
+    const OFFSET_NEXT_PAGE_ID: usize = 13;
+    const OFFSET_FREE_SPACE: usize = 17;
+    const OFFSET_TUPLE_COUNT: usize = 21;
+    const OFFSET_TUPLE_OFFSET: usize = 25;
     /// naming things is hard
-    const OFFSET_TUPLE_SIZE: usize = 28;
+    const OFFSET_TUPLE_SIZE: usize = 29;
 
-    // delete flag, the 32nd bit of tuple_size is the delte flag bit
-    const DELETE_MASK: u32 = 2147483648;
+    // delete flag, the 32nd bit of tuple_size is the delete flag bit
+    const DELETE_MASK: u32 = 1 << (size_of::<u32>() - 1);
 
     /// init the tablePage header.
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn new(page_id: u32, prev_page_id: Option<u32>) -> Result<TablePage> {
-        let page = Page::new()?;
+    pub fn new(page_id: u32, prev_page_id: Option<u32>, data: [u8; PAGE_SIZE]) -> Result<TablePage> {
+        if page_id == 0 {
+            return Err(Error::Value(String::from("table page id can not set 0!")));
+        }
+        let page = Page::new(page_id, data)?;
         let mut table_page = TablePage { page, status: ClockStatus::empty() };
         // used = true, when page created
         table_page.status.used();
@@ -367,6 +373,16 @@ impl TablePage {
         }
 
         self.status.edited();
+        Ok(true)
+    }
+
+    /// delete this page
+    pub fn delete_page(&mut self) -> Result<bool> {
+        if self.page_is_deleted()? {
+            return Ok(true);
+        }
+        let mut delete_flag = [1u8];
+        self.write_data(&mut delete_flag, TablePage::OFFSET_DELETED, 1)?;
         Ok(true)
     }
 
@@ -583,6 +599,13 @@ impl TablePage {
     /// get the ClockStatus from the table page to edit by ClockReplacer
     pub fn get_status_mut(&mut self) -> &mut ClockStatus {
         &mut self.status
+    }
+
+    /// check this page was deleted
+    pub fn page_is_deleted(&self) -> Result<bool> {
+        let mut flag = [0u8];
+        self.read_data(&mut flag, TablePage::OFFSET_DELETED, 1)?;
+        Ok(flag[0] == 0)
     }
 
     /// foreach slot array we haved, if tuple_size equals 0,

@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::slice::IterMut;
 use std::sync::{Arc, Mutex};
 
 /// Cache Page, and decide on page replacement behavior
@@ -23,11 +24,13 @@ pub enum ExpelLevel {
 pub struct ClockStatus {
     used: bool,
     edited: bool,
+    deleted: bool,
+    removed: bool
 }
 
 impl ClockStatus {
     pub fn empty() -> ClockStatus {
-        ClockStatus { used: false, edited: false }
+        ClockStatus { used: false, edited: false, deleted: false, removed: false }
     }
 
     pub fn used(&mut self) {
@@ -44,6 +47,18 @@ impl ClockStatus {
 
     pub fn is_edited(&self) -> bool {
         self.edited.clone()
+    }
+
+    pub fn set_deleted(&mut self, flag: bool) {
+        self.deleted = flag;
+    }
+
+    pub fn get_removed(&self) -> bool {
+        self.removed.clone()
+    }
+
+    pub fn set_removed(&mut self, flag: bool) {
+        self.removed = flag
     }
 
     pub fn level(&self) -> ExpelLevel {
@@ -77,7 +92,10 @@ impl ClockReplacer {
         let pages = &self.pages;
         let mut filter_page = pages
             .iter()
-            .filter(|p| page_id.eq(p.lock().unwrap().get_page_id()))
+            .filter(|p| {
+                let mut lock_page = p.lock().unwrap();
+                lock_page.get_page_id().eq(&page_id) && !lock_page.get_status_mut().get_removed()
+            })
             .collect::<Vec<_>>();
         if let Some(page) = filter_page.get_mut(0) {
             let page_rc = Arc::clone(page);
@@ -98,6 +116,21 @@ impl ClockReplacer {
             self.pages.push(push_page);
         }
         Ok(None)
+    }
+
+    /// get all page info when if it was edited
+    pub fn get_need_flush(&self) -> Vec<(u32, &[u8])> {
+        let mut result: Vec<(u32, &[u8])> = Vec::new();
+        for page in &self.pages {
+            let mut table_page = page.lock().unwrap();
+            if table_page.get_status_mut().is_edited() {
+                let page_id = table_page.get_page_id();
+                let page_data = table_page.get_data();
+                result.push((page_id.clone(), page_data));
+            }
+        }
+
+        result
     }
 
     /// clockwise!!!
