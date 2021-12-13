@@ -5,7 +5,6 @@ use std::{
 
 use crate::{error::Error, error::Result, storage::relational::page::PAGE_SIZE};
 
-use super::clock_replacer::ClockStatus;
 use super::{clock_replacer::ClockReplacer, disk_manager::DiskManager, page::TablePage};
 
 /// BufferPool struct
@@ -84,10 +83,17 @@ impl BufferPoolManager {
     }
 
     pub fn delete_page(&mut self, page_id: u32) -> Result<bool> {
+        if let Some(remove_page) = self.clock_replacer.pop(page_id) {
+            let mut page = remove_page.lock().unwrap();
+            if page.get_status_mut().is_edited() {
+                let page_data = page.get_data();
+                self.disk_manager.write_page(*page.get_page_id(), page_data)?;
+            }
+        }
         todo!()
     }
 
-    pub fn flush_page(&mut self, page_id: u32) -> Result<()> {
+    pub fn flush_page(&mut self, _page_id: u32) -> Result<()> {
         todo!()
     }
 

@@ -1,8 +1,6 @@
 use super::page::TablePage;
 use crate::error::{Error, Result};
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 /// Cache Page, and decide on page replacement behavior
@@ -98,6 +96,23 @@ impl ClockReplacer {
             self.pages.push(push_page);
         }
         Ok(None)
+    }
+
+    /// pop with page_id
+    pub fn pop(&mut self, page_id: u32) -> Option<Arc<Mutex<TablePage>>> {
+        let mut index = 0;
+        let mut have = false;
+        for page in &self.pages {
+            if page_id.eq(page.lock().unwrap().get_page_id()) {
+                have = true;
+                break;
+            }
+            index += 1;
+        }
+        if have {
+            return Some(self.pages.remove(index));
+        }
+        None
     }
 
     /// clockwise!!!
