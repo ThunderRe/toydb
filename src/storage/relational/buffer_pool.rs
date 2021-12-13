@@ -3,8 +3,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{error::Error, error::Result, storage::relational::page::PAGE_SIZE};
 use crate::storage::relational::page::HeaderPage;
+use crate::{error::Error, error::Result, storage::relational::page::PAGE_SIZE};
 
 use super::{clock_replacer::ClockReplacer, disk_manager::DiskManager, page::TablePage};
 
@@ -34,7 +34,7 @@ impl BufferPoolManager {
             Ok(Some(cache_page))
         } else {
             // read page from disk
-            let mut page_data = self.read_disk_page(page_id)?;
+            let page_data = self.read_disk_page(page_id)?;
 
             let mut prev_page_id = None;
             if page_id > 1 {
@@ -55,7 +55,7 @@ impl BufferPoolManager {
         if page_id > 1 {
             prev_page_id = Some(page_id - 1);
         }
-        let mut page_data = self.read_disk_page(page_id)?;
+        let page_data = self.read_disk_page(page_id)?;
 
         let table_page = TablePage::new(page_id, prev_page_id, page_data)?;
         self.push_cache(table_page)
@@ -87,10 +87,7 @@ impl BufferPoolManager {
     }
 
     pub fn flush_all(&mut self) -> Result<()> {
-        for (page_id, data) in self.clock_replacer.get_need_flush() {
-            self.disk_manager.write_page(page_id, data)?;
-        }
-        Ok(())
+        self.clock_replacer.flush_all(&mut self.disk_manager)
     }
 
     /// when buffer pool create or read a page, it should be push to cache.

@@ -1,8 +1,8 @@
-use std::mem::size_of;
 use super::clock_replacer::ClockStatus;
 use super::tuple::RID;
 use crate::error::{Error, Result};
 use crate::storage::relational::tuple::Tuple;
+use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 use std::option::Option::Some;
 use std::str;
@@ -113,7 +113,7 @@ impl Page {
 impl HeaderPage {
     pub fn new(data: [u8; PAGE_SIZE]) -> Result<HeaderPage> {
         let mut header_page = HeaderPage { page: Page::new(0, data)? };
-        header_page.set_record_count(0);
+        header_page.set_record_count(0)?;
         Ok(header_page)
     }
 
@@ -222,7 +222,6 @@ impl HeaderPage {
 }
 
 impl TablePage {
-
     /// table page's header end offset
     /// or slot arrays start offset
     const SIZE_TABLE_PAGE_HEADER: usize = 25;
@@ -249,7 +248,11 @@ impl TablePage {
     /// page_id: the page ID of this table page
     /// page_size: the size of this table page
     /// prev_page_id: the previous table page ID
-    pub fn new(page_id: u32, prev_page_id: Option<u32>, data: [u8; PAGE_SIZE]) -> Result<TablePage> {
+    pub fn new(
+        page_id: u32,
+        prev_page_id: Option<u32>,
+        data: [u8; PAGE_SIZE],
+    ) -> Result<TablePage> {
         if page_id == 0 {
             return Err(Error::Value(String::from("table page id can not set 0!")));
         }

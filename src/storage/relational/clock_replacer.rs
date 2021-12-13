@@ -1,11 +1,7 @@
+use super::disk_manager::DiskManager;
 use super::page::TablePage;
 use crate::error::{Error, Result};
 use std::collections::HashMap;
-<<<<<<< HEAD
-=======
-use std::rc::Rc;
-use std::slice::IterMut;
->>>>>>> d2915f882ef6e55a74df1152d086d6d33d5f0766
 use std::sync::{Arc, Mutex};
 
 /// Cache Page, and decide on page replacement behavior
@@ -27,7 +23,7 @@ pub struct ClockStatus {
     used: bool,
     edited: bool,
     deleted: bool,
-    removed: bool
+    removed: bool,
 }
 
 impl ClockStatus {
@@ -120,19 +116,19 @@ impl ClockReplacer {
         Ok(None)
     }
 
-    /// get all page info when if it was edited
-    pub fn get_need_flush(&self) -> Vec<(u32, &[u8])> {
-        let mut result: Vec<(u32, &[u8])> = Vec::new();
+    /// flush all page data, where it was edited
+    pub fn flush_all(&self, disk_manager: &mut DiskManager) -> Result<()> {
         for page in &self.pages {
-            let mut table_page = page.lock().unwrap();
+            let arc_page = Arc::clone(page);
+            let mut table_page = arc_page.lock().unwrap();
             if table_page.get_status_mut().is_edited() {
-                let page_id = table_page.get_page_id();
+                let page_id = *table_page.get_page_id();
                 let page_data = table_page.get_data();
-                result.push((page_id.clone(), page_data));
+                disk_manager.write_page(page_id, page_data)?;
             }
         }
 
-        result
+        Ok(())
     }
 
     /// clockwise!!!
@@ -210,6 +206,8 @@ impl ClockReplacer {
                 let list = vec![index];
                 result_map.insert(level, list);
             }
+
+            index += 1;
         }
         result_map
     }
