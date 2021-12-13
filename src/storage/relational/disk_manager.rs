@@ -59,9 +59,8 @@ impl DiskManager {
 
     /// Read the contents of the specified page into the given memory area
     pub fn read_page(&mut self, page_id: u32, buf: &mut [u8]) -> Result<()> {
-        let file_size = self.get_db_size()?;
-        let offset = (page_id * (PAGE_SIZE as u32)) as u64;
-        if offset > file_size {
+        let offset = page_id as u64 * PAGE_SIZE as u64;
+        if !self.have_page(page_id)? {
             return Err(Error::Value("this db can't find page_id".to_string()));
         }
 
@@ -69,6 +68,17 @@ impl DiskManager {
         db_file.seek(SeekFrom::Start(offset))?;
         db_file.read_exact(buf)?;
         Ok(())
+    }
+
+    /// check this db have page by page id
+    pub fn have_page(&mut self, page_id: u32) -> Result<bool> {
+        let file_size = self.get_db_size()?;
+        let offset = page_id as u64 * PAGE_SIZE as u64;
+        if offset + PAGE_SIZE as u64 > file_size {
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 
     /// Write the contents of the log into disk file
