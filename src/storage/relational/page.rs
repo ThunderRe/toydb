@@ -242,7 +242,7 @@ impl TablePage {
     const OFFSET_TUPLE_SIZE: usize = 29;
 
     // delete flag, the 32nd bit of tuple_size is the delete flag bit
-    const DELETE_MASK: u32 = 1 << (size_of::<u32>() - 1);
+    const DELETE_MASK: u32 = 1 << (size_of::<u32>() * 8 - 1);
 
     /// init the tablePage header.
     /// page_id: the page ID of this table page
@@ -326,9 +326,6 @@ impl TablePage {
     pub fn insert_tuple(&mut self, tuple: &mut Tuple) -> Result<bool> {
         if tuple.get_length() == 0 {
             return Err(Error::Value(String::from("Can't have empty tuple!")));
-        }
-        if let None = tuple.get_rid() {
-            return Ok(false);
         }
         if self.get_free_space_remaining()? < (tuple.get_length() + TablePage::SIZE_TUPLE) as u32 {
             return Ok(false);
