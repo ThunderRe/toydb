@@ -22,11 +22,10 @@ async fn main() -> Result<()> {
                 .long("config")
                 .help("Configuration file path")
                 .takes_value(true)
-                .default_value("/etc/toydb.yaml"),
+                .default_value("/home/yoke/rustproject/toydb/clusters/local/toydb-a/toydb.yaml"),
         )
         .get_matches();
     let cfg = Config::new(opts.value_of("config").unwrap())?;
-
     let loglevel = cfg.log_level.parse::<simplelog::LevelFilter>()?;
     let mut logconfig = simplelog::ConfigBuilder::new();
     if loglevel != simplelog::LevelFilter::Debug {

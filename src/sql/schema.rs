@@ -7,6 +7,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 /// The catalog stores schema information
+/// 存储信息目录接口
 pub trait Catalog {
     /// Creates a new table
     fn create_table(&mut self, table: Table) -> Result<()>;
@@ -27,17 +28,20 @@ pub trait Catalog {
     fn table_references(&self, table: &str, with_self: bool) -> Result<Vec<(String, Vec<String>)>> {
         Ok(self
             .scan_tables()?
+            // 如果with_self为false则表示不包含自身表，此时filter会过滤出所有表名和table不相等的表
             .filter(|t| with_self || t.name != table)
             .map(|t| {
                 (
                     t.name,
                     t.columns
                         .iter()
+                        // 过滤出某一列是这张表的reference的列
                         .filter(|c| c.references.as_deref() == Some(table))
                         .map(|c| c.name.clone())
                         .collect::<Vec<_>>(),
                 )
             })
+            // 如果某张表reference了table,则columns必定不为空
             .filter(|(_, cs)| !cs.is_empty())
             .collect())
     }

@@ -10,6 +10,7 @@ use std::clone::Clone;
 use std::collections::HashSet;
 
 /// A SQL engine based on an underlying MVCC key/value store
+/// 一个基于MVCC的sql引擎
 pub struct KV {
     /// The underlying key/value store
     pub(super) kv: kv::MVCC,
@@ -39,6 +40,7 @@ impl KV {
     }
 }
 
+// KV还是一个sql引擎
 impl super::Engine for KV {
     type Transaction = Transaction;
 
@@ -62,6 +64,7 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 }
 
 /// An SQL transaction based on an MVCC key/value transaction
+/// 一个以mvcc事务为基础的sql事务
 pub struct Transaction {
     txn: kv::mvcc::Transaction,
 }
@@ -99,6 +102,7 @@ impl Transaction {
     }
 }
 
+/// 这个事务还是sql事务，即mod中定义的sql事务
 impl super::Transaction for Transaction {
     fn id(&self) -> u64 {
         self.txn.id()
@@ -266,6 +270,7 @@ impl super::Transaction for Transaction {
     }
 }
 
+/// sql事务可以查看存储信息
 impl Catalog for Transaction {
     fn create_table(&mut self, table: Table) -> Result<()> {
         if self.read_table(&table.name)?.is_some() {
@@ -278,12 +283,15 @@ impl Catalog for Transaction {
     fn delete_table(&mut self, table: &str) -> Result<()> {
         let table = self.must_read_table(table)?;
         if let Some((t, cs)) = self.table_references(&table.name, false)?.first() {
+            // 只要有一张表关联了要删除的表，则删除失败
             return Err(Error::Value(format!(
                 "Table {} is referenced by table {} column {}",
                 table.name, t, cs[0]
             )));
         }
+        // 遍历这张表的所有数据,因此filter为None
         let mut scan = self.scan(&table.name, None)?;
+        // 分别删除
         while let Some(row) = scan.next().transpose()? {
             self.delete(&table.name, &table.get_row_key(&row)?)?
         }
@@ -311,10 +319,13 @@ impl Catalog for Transaction {
 /// this is ok. Uses Cows since we want to borrow when encoding but return owned when decoding.
 enum Key<'a> {
     /// A table schema key for the given table name
+    /// 记录表格元数据的key
     Table(Option<Cow<'a, str>>),
     /// A key for an index entry
+    /// 索引的key
     Index(Cow<'a, str>, Cow<'a, str>, Option<Cow<'a, Value>>),
     /// A key for a row identified by table name and row primary key
+    /// 表格内容的key
     Row(Cow<'a, str>, Option<Cow<'a, Value>>),
 }
 

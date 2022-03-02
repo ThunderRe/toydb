@@ -96,6 +96,7 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 }
 
 /// An MVCC transaction.
+/// 一个mvcc事务
 pub struct Transaction {
     /// The underlying store for the transaction. Shared between transactions using a mutex.
     store: Arc<RwLock<Box<dyn Store>>>,
@@ -188,6 +189,7 @@ impl Transaction {
     }
 
     /// Deletes a key.
+    /// 删除一个key并不是将key也删除，而是将key对应的value置为None
     pub fn delete(&mut self, key: &[u8]) -> Result<()> {
         self.write(key, None)
     }
@@ -195,10 +197,13 @@ impl Transaction {
     /// Fetches a key.
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let session = self.store.read()?;
+        // scan all transaction version
+        // 遍历所有在这个事务之前的版本
         let mut scan = session
             .scan(Range::from(
                 Key::Record(key.into(), 0).encode()..=Key::Record(key.into(), self.id).encode(),
             ))
+            // 倒序排列，这样得到的将会是最新的事务记录
             .rev();
         while let Some((k, v)) = scan.next().transpose()? {
             match Key::decode(&k)? {
@@ -216,8 +221,11 @@ impl Transaction {
     /// Scans a key range.
     pub fn scan(&self, range: impl RangeBounds<Vec<u8>>) -> Result<super::Scan> {
         let start = match range.start_bound() {
+            // 不包含key,则从这个key的最后一个事务id开始
             Bound::Excluded(k) => Bound::Excluded(Key::Record(k.into(), std::u64::MAX).encode()),
+            // 包含这个key,则从这个key的第一个事务开始
             Bound::Included(k) => Bound::Included(Key::Record(k.into(), 0).encode()),
+            // 无边界,则从空记录的首个事务开始
             Bound::Unbounded => Bound::Included(Key::Record(vec![].into(), 0).encode()),
         };
         let end = match range.end_bound() {
@@ -236,6 +244,7 @@ impl Transaction {
         }
         let start = prefix.to_vec();
         let mut end = start.clone();
+        // 从高到低遍历
         for i in (0..end.len()).rev() {
             match end[i] {
                 // If all 0xff we could in principle use Range::Unbounded, but it won't happen
@@ -267,7 +276,10 @@ impl Transaction {
 
         // Check if the key is dirty, i.e. if it has any uncommitted changes, by scanning for any
         // versions that aren't visible to us.
+        // 扫描这个Key的所有事务版本来判断是否有相同Key已经执行了插入但是未提交的情况
+        // 首先获取这个事务快照中最小的活动事务id
         let min = self.snapshot.invisible.iter().min().cloned().unwrap_or(self.id + 1);
+        // 以这个事务id开始，遍历这个Key的所有后续事务记录
         let mut scan = session
             .scan(Range::from(
                 Key::Record(key.into(), min).encode()
@@ -278,6 +290,7 @@ impl Transaction {
             match Key::decode(&k)? {
                 Key::Record(_, version) => {
                     if !self.snapshot.is_visible(version) {
+                        // 如果有一个不可见的且还没提交的事务已经写入了key相同的记录，则本次事务无法写入
                         return Err(Error::Serialization);
                     }
                 }
@@ -366,6 +379,8 @@ impl Snapshot {
     }
 
     /// Checks whether the given version is visible in this snapshot.
+    /// 检查给定的事务id能否被拥有当前快照的事务看到
+    /// 对于事务来说，所有在他之前还处于活动状态的事务都是不可见的
     fn is_visible(&self, version: u64) -> bool {
         version <= self.version && self.invisible.get(&version).is_none()
     }

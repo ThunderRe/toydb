@@ -32,7 +32,9 @@ impl Client {
         }
     }
 
-    /// Queries the Raft state machine.
+    ///  Queries the Raft state machine. More than this
+    ///
+    /// Query a raft command
     pub async fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
         match self.request(Request::Query(command)).await? {
             Response::State(response) => Ok(response),

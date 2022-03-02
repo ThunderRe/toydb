@@ -686,12 +686,19 @@ impl Scope {
     fn add_column(&mut self, table: Option<String>, label: Option<String>) {
         if let Some(l) = label.clone() {
             if let Some(t) = table.clone() {
+                // 通过表名和列名构建的元组作为key,value则是这次要添加的列的columns下标
+                // the key is union by table name and column name
+                // the value is index by this insert column
                 self.qualified.insert((t, l.clone()), self.columns.len());
             }
+
+            // if this column name was
             if !self.ambiguous.contains(&l) {
+                // if this column name is unique, we can find it just by column name
                 if !self.unqualified.contains_key(&l) {
                     self.unqualified.insert(l, self.columns.len());
                 } else {
+                    // if a column with the same name appears
                     self.unqualified.remove(&l);
                     self.ambiguous.insert(l);
                 }

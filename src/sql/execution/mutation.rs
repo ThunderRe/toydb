@@ -24,8 +24,11 @@ impl Insert {
             return Err(Error::Value("Column and value counts do not match".into()));
         }
         let mut inputs = HashMap::new();
+        // 循环插入的列以及插入的值
         for (c, v) in columns.iter().zip(values.into_iter()) {
+            // 检查插入列是否存在
             table.get_column(c)?;
+            // 检查插入是否成功
             if inputs.insert(c.clone(), v).is_some() {
                 return Err(Error::Value(format!("Column {} given multiple times", c)));
             }
@@ -33,10 +36,13 @@ impl Insert {
         let mut row = Row::new();
         for column in table.columns.iter() {
             if let Some(value) = inputs.get(&column.name) {
+                // 插入的列
                 row.push(value.clone())
             } else if let Some(value) = &column.default {
+                // 默认的列
                 row.push(value.clone())
             } else {
+                // 不存在的列
                 return Err(Error::Value(format!("No value given for column {}", column.name)));
             }
         }
@@ -45,6 +51,7 @@ impl Insert {
 
     /// Pads a row with default values where possible.
     fn pad_row(table: &Table, mut row: Row) -> Result<Row> {
+        // just append value in thr row
         for column in table.columns.iter().skip(row.len()) {
             if let Some(default) = &column.default {
                 row.push(default.clone())
@@ -105,14 +112,20 @@ impl<T: Transaction> Executor<T> for Update<T> {
                 // FIXME This is not safe for primary key updates, which may still be processed
                 // multiple times - it should be possible to come up with a pathological case that
                 // loops forever (e.g. UPDATE test SET id = id + 1).
+                // 这里通过跟踪主键来避免一个项目多次迭代，但这样会导致对主键的迭代更新出现死循环，
+                // 如UPDATE test SET id = id + 1
                 let mut updated = HashSet::new();
                 while let Some(row) = rows.next().transpose()? {
+                    // 获取一行数据,获取改数据的主键id
                     let id = table.get_row_key(&row)?;
+                    // 如果已经包含该主键，则跳过更新
                     if updated.contains(&id) {
                         continue;
                     }
                     let mut new = row.clone();
                     for (field, expr) in &self.expressions {
+                        // 迭代每行要更新的列
+                        // field: 要更新的列所在的下标
                         new[*field] = expr.evaluate(Some(&row))?;
                     }
                     txn.update(&table.name, &id, new)?;
