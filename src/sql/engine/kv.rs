@@ -136,8 +136,11 @@ impl super::Transaction for Transaction {
         )?;
 
         // Update indexes
+        // 写入完成后需要更新索引
         for (i, column) in table.columns.iter().enumerate().filter(|(_, c)| c.index) {
+            // 索引因素：表名、列名、要构建索引的值
             let mut index = self.index_load(&table.name, &column.name, &row[i])?;
+            // 将主键也加入索引
             index.insert(id.clone());
             self.index_save(&table.name, &column.name, &row[i], index)?;
         }
@@ -148,13 +151,17 @@ impl super::Transaction for Transaction {
         let table = self.must_read_table(table)?;
         for (t, cs) in self.table_references(&table.name, true)? {
             let t = self.must_read_table(&t)?;
+            // 获取所有reference要删除的table的表
             let cs = cs
                 .into_iter()
                 .map(|c| Ok((t.get_column_index(&c)?, c)))
                 .collect::<Result<Vec<_>>>()?;
+            // 扫描跟它有关联的表
             let mut scan = self.scan(&t.name, None)?;
             while let Some(row) = scan.next().transpose()? {
+                // 获取该列信息
                 for (i, c) in &cs {
+                    // 如果另一张表中有一段数据跟要删除的数据关联，则删除失败
                     if &row[*i] == id && (table.name != t.name || id != &table.get_row_key(&row)?) {
                         return Err(Error::Value(format!(
                             "Primary key {} is referenced by table {} column {}",
@@ -165,10 +172,12 @@ impl super::Transaction for Transaction {
             }
         }
 
+        // 删除索引
         let indexes: Vec<_> = table.columns.iter().enumerate().filter(|(_, c)| c.index).collect();
         if !indexes.is_empty() {
             if let Some(row) = self.read(&table.name, id)? {
                 for (i, column) in indexes {
+                    // 根据表-列-列值获取索引
                     let mut index = self.index_load(&table.name, &column.name, &row[i])?;
                     index.remove(id);
                     self.index_save(&table.name, &column.name, &row[i], index)?;
@@ -187,6 +196,7 @@ impl super::Transaction for Transaction {
 
     fn read_index(&self, table: &str, column: &str, value: &Value) -> Result<HashSet<Value>> {
         if !self.must_read_table(table)?.get_column(column)?.index {
+            // 如果该列不是索引则抛出错误
             return Err(Error::Value(format!("No index on {}.{}", table, column)));
         }
         self.index_load(table, column, value)
@@ -224,11 +234,14 @@ impl super::Transaction for Transaction {
         }
         Ok(Box::new(
             self.txn
+            // 从store中查询Index
                 .scan_prefix(
                     &Key::Index((&table.name).into(), (&column.name).into(), None).encode(),
                 )?
                 .map(|r| -> Result<(Value, HashSet<Value>)> {
+                    // 索引的id和对应的值
                     let (k, v) = r?;
+                    // 获取索引的id
                     let value = match Key::decode(&k)? {
                         Key::Index(_, _, Some(pk)) => pk.into_owned(),
                         _ => return Err(Error::Internal("Invalid index key".into())),

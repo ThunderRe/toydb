@@ -80,21 +80,3 @@ fn tests() -> Result<()> {
     use super::TestSuite;
     Test::test()
 }
-
-#[test]
-fn test_hybrid_storage() -> Result<()> {
-    let path_str = "storage_temp";
-    let path = Path::new(path_str);
-    let mut engine = Hybrid::new(path, true)?;
-    for _i in 0..100 {
-        let data_str = "读时模式类似于编程语言中的动态（运行时）类型检查，而写时模式类似于静态（编译时）类型检查。就像静态和动态类型检查的相对优点具有很大的争议性一样【22】，数据库中模式的强制性是一个具有争议的话题，一般来说没有正确或错误的答案。";
-        let data_vec = data_str.as_bytes();
-        let mut vec: Vec<u8> = Vec::new();
-        for data in data_vec {
-            vec.push(*data);
-        }
-        let index = engine.append(vec)?;
-        engine.commit(index)?;
-    }
-    Ok(())
-}

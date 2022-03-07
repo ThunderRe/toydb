@@ -175,6 +175,7 @@ impl Transaction {
             ));
             while let Some((key, _)) = scan.next().transpose()? {
                 match Key::decode(&key)? {
+                    // 这里的updated_key就是这个事务写入的记录key(Record)
                     Key::TxnUpdate(_, updated_key) => rollback.push(updated_key.into_owned()),
                     k => return Err(Error::Internal(format!("Expected TxnUpdate, got {:?}", k))),
                 };
@@ -301,6 +302,7 @@ impl Transaction {
 
         // Write the key and its update record.
         let key = Key::Record(key.into(), self.id).encode();
+        // 在这里写入事务id和对应的记录key
         let update = Key::TxnUpdate(self.id, (&key).into()).encode();
         session.set(&update, vec![])?;
         session.set(&key, serialize(&value)?)
