@@ -254,6 +254,7 @@ impl super::Transaction for Transaction {
     fn update(&mut self, table: &str, id: &Value, row: Row) -> Result<()> {
         let table = self.must_read_table(table)?;
         // If the primary key changes we do a delete and create, otherwise we replace the row
+        // 如果更新的数据主键和where中的id不一致，则删除id的字段然后创建row
         if id != &table.get_row_key(&row)? {
             self.delete(&table.name, id)?;
             self.create(&table.name, row)?;
@@ -261,11 +262,13 @@ impl super::Transaction for Transaction {
         }
 
         // Update indexes, knowing that the primary key has not changed
+        // 更新索引,已知主键未发生变化
         let indexes: Vec<_> = table.columns.iter().enumerate().filter(|(_, c)| c.index).collect();
         if !indexes.is_empty() {
             let old = self.read(&table.name, id)?.unwrap();
             for (i, column) in indexes {
                 if old[i] == row[i] {
+                    // 如果新要更新的数据中存在索引的列的值和原来的值相同，则跳过
                     continue;
                 }
                 let mut index = self.index_load(&table.name, &column.name, &old[i])?;
@@ -338,7 +341,7 @@ enum Key<'a> {
     /// 索引的key
     Index(Cow<'a, str>, Cow<'a, str>, Option<Cow<'a, Value>>),
     /// A key for a row identified by table name and row primary key
-    /// 表格内容的key
+    /// 表格内容的key,由表名、主键值组成
     Row(Cow<'a, str>, Option<Cow<'a, Value>>),
 }
 

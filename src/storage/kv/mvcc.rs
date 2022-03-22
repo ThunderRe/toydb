@@ -234,6 +234,7 @@ impl Transaction {
             Bound::Included(k) => Bound::Included(Key::Record(k.into(), std::u64::MAX).encode()),
             Bound::Unbounded => Bound::Unbounded,
         };
+        // 范围查询出键值的元组
         let scan = self.store.read()?.scan(Range::from((start, end)));
         Ok(Box::new(Scan::new(scan, self.snapshot.clone())))
     }
@@ -463,8 +464,10 @@ impl Scan {
         // to decode the last version.
         scan = Box::new(scan.filter_map(move |r| {
             r.and_then(|(k, v)| match Key::decode(&k)? {
+                // 范围扫描的数据如果不可见，则过滤
                 Key::Record(_, version) if !snapshot.is_visible(version) => Ok(None),
                 Key::Record(key, _) => Ok(Some((key.into_owned(), v))),
+                // 只有记录数据才能够范围扫描，否则报错
                 k => Err(Error::Internal(format!("Expected Record, got {:?}", k))),
             })
             .transpose()
@@ -476,10 +479,14 @@ impl Scan {
     fn try_next(&mut self) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
         while let Some((key, value)) = self.scan.next().transpose()? {
             // Only return the item if it is the last version of the key.
+            // 查看下一个元素
             if match self.scan.peek() {
+                // 如果下一个元素跟当前元素的key不相等,则表示此次执行next的元素已经是最新的
                 Some(Ok((peek_key, _))) if *peek_key != key => true,
+                // 如果下一个元素的key和当前key相同,则表示当前key并不是最新的事务记录
                 Some(Ok(_)) => false,
                 Some(Err(err)) => return Err(err.clone()),
+                // 到达最后
                 None => true,
             } {
                 // Only return non-deleted items.

@@ -33,6 +33,7 @@ impl Server {
         sql_store: Box<dyn kv::Store>,
     ) -> Result<Self> {
         Ok(Server {
+            // 对外入口是raft?
             raft: raft::Server::new(
                 id,
                 peers,
@@ -46,6 +47,7 @@ impl Server {
     }
 
     /// Starts listening on the given ports. Must be called before serve.
+    /// 开始监听指定端口
     pub async fn listen(mut self, sql_addr: &str, raft_addr: &str) -> Result<Self> {
         let (sql, raft) =
             tokio::try_join!(TcpListener::bind(sql_addr), TcpListener::bind(raft_addr),)?;
@@ -56,6 +58,7 @@ impl Server {
     }
 
     /// Serves Raft and SQL requests until the returned future is dropped. Consumes the server.
+    /// 开启服务
     pub async fn serve(self) -> Result<()> {
         let sql_listener = self
             .sql_listener
@@ -63,10 +66,21 @@ impl Server {
         let raft_listener = self
             .raft_listener
             .ok_or_else(|| Error::Internal("Must listen before serving".into()))?;
+        // 创建一条管道
         let (raft_tx, raft_rx) = mpsc::unbounded_channel();
+
+        // 发送者位于本地raft服务,而本地raft服务位于sql引擎中。
+        // 可见：
+        // 客户端连接的是toydb的sql服务地址,sql服务会将raft日志通过管道传输给raft服务
+        // raft服务将日志与其他节点进行同步
+        // 现在问题是如何接收到其他raft节点的信息,也是通过sql listener还是raft listener
+        // 如果是,那么raft服务如何将操作发送给sql引擎。
+        // 还有一种可能，raft服务也包括处理本地数据，这样只需要由raft服务与其他节点进行通信即可同步数据
+        // sql listener只需要负责接收客户端的消息并生成日志给raft服务即可
         let sql_engine = sql::engine::Raft::new(raft::Client::new(raft_tx));
 
         tokio::try_join!(
+            // raft服务,用于和其他raft节点进行通信
             self.raft.serve(raft_listener, raft_rx),
             Self::serve_sql(sql_listener, sql_engine),
         )?;
@@ -76,6 +90,7 @@ impl Server {
     /// Serves SQL clients.
     async fn serve_sql(listener: TcpListener, engine: sql::engine::Raft) -> Result<()> {
         let mut listener = TcpListenerStream::new(listener);
+        // 获取一个连接
         while let Some(socket) = listener.try_next().await? {
             let peer = socket.peer_addr()?;
             let session = Session::new(engine.clone())?;
@@ -111,6 +126,7 @@ pub enum Response {
 }
 
 /// A client session coupled to a SQL session.
+/// 与sql会话耦合的客户端会话
 pub struct Session {
     engine: sql::engine::Raft,
     sql: sql::engine::Session<sql::engine::Raft>,
@@ -118,6 +134,7 @@ pub struct Session {
 
 impl Session {
     /// Creates a new client session.
+    /// 创建一个新的session
     fn new(engine: sql::engine::Raft) -> Result<Self> {
         Ok(Self { sql: engine.session()?, engine })
     }

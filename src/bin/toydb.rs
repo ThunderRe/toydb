@@ -15,6 +15,7 @@ use toydb::Server;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // 读取命令行配置
     let opts = app_from_crate!()
         .arg(
             clap::Arg::with_name("config")
@@ -25,20 +26,27 @@ async fn main() -> Result<()> {
                 .default_value("/home/yoke/rustproject/toydb/clusters/local/toydb-a/toydb.yaml"),
         )
         .get_matches();
+    // 解析配置为config对象
     let cfg = Config::new(opts.value_of("config").unwrap())?;
+    // 获取日志等级
     let loglevel = cfg.log_level.parse::<simplelog::LevelFilter>()?;
     let mut logconfig = simplelog::ConfigBuilder::new();
     if loglevel != simplelog::LevelFilter::Debug {
+        // 如果日志等级不是Debug，则将其加入日志
         logconfig.add_filter_allow_str("toydb");
     }
+    // 初始化日志
     simplelog::SimpleLogger::init(loglevel, logconfig.build())?;
 
+    // 获取数据库目录
     let path = std::path::Path::new(&cfg.data_dir);
+    // 获取raft存储方式
     let raft_store: Box<dyn storage::log::Store> = match cfg.storage_raft.as_str() {
         "hybrid" | "" => Box::new(storage::log::Hybrid::new(path, cfg.sync)?),
         "memory" => Box::new(storage::log::Memory::new()),
         name => return Err(Error::Config(format!("Unknown Raft storage engine {}", name))),
     };
+    // 获取sql存储方式
     let sql_store: Box<dyn storage::kv::Store> = match cfg.storage_sql.as_str() {
         "memory" | "" => Box::new(storage::kv::Memory::new()),
         "stdmemory" => Box::new(storage::kv::StdMemory::new()),

@@ -63,8 +63,10 @@ pub struct Status {
 }
 
 /// An SQL engine that wraps a Raft cluster.
+/// 一个封装了raft集群的sql引擎
 #[derive(Clone)]
 pub struct Raft {
+    // raft 客户端
     client: raft::Client,
 }
 
@@ -141,6 +143,7 @@ impl Transaction {
     }
 
     /// Executes a mutation
+    /// 之变变更
     fn mutate(&self, mutation: Mutation) -> Result<Vec<u8>> {
         futures::executor::block_on(self.client.mutate(Raft::serialize(&mutation)?))
     }
