@@ -10,6 +10,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// A Raft state machine mutation
+/// raft状态机变更
 #[derive(Clone, Serialize, Deserialize)]
 enum Mutation {
     /// Begins a transaction in the given mode
@@ -143,7 +144,7 @@ impl Transaction {
     }
 
     /// Executes a mutation
-    /// 之变变更
+    /// 通知raft serve变更
     fn mutate(&self, mutation: Mutation) -> Result<Vec<u8>> {
         futures::executor::block_on(self.client.mutate(Raft::serialize(&mutation)?))
     }

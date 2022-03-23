@@ -234,7 +234,7 @@ impl super::Transaction for Transaction {
         }
         Ok(Box::new(
             self.txn
-            // 从store中查询Index
+                // 从store中查询Index
                 .scan_prefix(
                     &Key::Index((&table.name).into(), (&column.name).into(), None).encode(),
                 )?

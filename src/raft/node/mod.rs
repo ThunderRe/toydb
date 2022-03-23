@@ -98,6 +98,7 @@ impl Node {
     }
 
     /// Processes a message.
+    /// 处理一条raft消息
     pub fn step(self, msg: Message) -> Result<Self> {
         debug!("Stepping {:?}", msg);
         match self {

@@ -16,6 +16,7 @@ use uuid::Uuid;
 const TICK: Duration = Duration::from_millis(100);
 
 /// A Raft server.
+/// raft服务器
 pub struct Server {
     node: Node,
     peers: HashMap<String, String>,
@@ -46,52 +47,71 @@ impl Server {
     }
 
     /// Connects to peers and serves requests.
+    /// 连接其他节点并服务请求
     pub async fn serve(
         self,
-        listener: TcpListener,
+        listener: TcpListener, // raft监听地址
         client_rx: mpsc::UnboundedReceiver<(Request, oneshot::Sender<Result<Response>>)>,
     ) -> Result<()> {
+        // 创建两条单向管道,用于tcp消息的互相通信
         let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Message>();
         let (tcp_out_tx, tcp_out_rx) = mpsc::unbounded_channel::<Message>();
+
+        // 创建raft集群消息接收线程
         let (task, tcp_receiver) = Self::tcp_receive(listener, tcp_in_tx).remote_handle();
         tokio::spawn(task);
+
+        // 创建raft集群消息发送线程
         let (task, tcp_sender) =
             Self::tcp_send(self.node.id(), self.peers, tcp_out_rx).remote_handle();
         tokio::spawn(task);
+
+        // 创建任务分派主线程,该线程负责将各个模块的消息发往对应的目标,也就是一个统一的消息处理线程
         let (task, eventloop) =
             Self::eventloop(self.node, self.node_rx, client_rx, tcp_in_rx, tcp_out_tx)
                 .remote_handle();
         tokio::spawn(task);
 
+        // 阻塞线程
         tokio::try_join!(tcp_receiver, tcp_sender, eventloop)?;
         Ok(())
     }
 
     /// Runs the event loop.
+    /// 创建循环
     async fn eventloop(
-        mut node: Node,
-        node_rx: mpsc::UnboundedReceiver<Message>,
-        client_rx: mpsc::UnboundedReceiver<(Request, oneshot::Sender<Result<Response>>)>,
-        tcp_rx: mpsc::UnboundedReceiver<Message>,
-        tcp_tx: mpsc::UnboundedSender<Message>,
+        mut node: Node,                            // 本地节点信息
+        node_rx: mpsc::UnboundedReceiver<Message>, // 通过节点进行通信的消费者
+        client_rx: mpsc::UnboundedReceiver<(Request, oneshot::Sender<Result<Response>>)>, // 从SQL引擎发起的消息队列消费者
+        tcp_rx: mpsc::UnboundedReceiver<Message>, // 接收来自集群其他节点消息的消费者
+        tcp_tx: mpsc::UnboundedSender<Message>,   // 发送给集群其他节点的生产者
     ) -> Result<()> {
         let mut node_rx = UnboundedReceiverStream::new(node_rx);
         let mut tcp_rx = UnboundedReceiverStream::new(tcp_rx);
         let mut client_rx = UnboundedReceiverStream::new(client_rx);
 
+        // 创建一个ticker（定时器）
         let mut ticker = tokio::time::interval(TICK);
+
         let mut requests = HashMap::<Vec<u8>, oneshot::Sender<Result<Response>>>::new();
         loop {
             tokio::select! {
+                // 没有任何消息，跳一次tick
                 _ = ticker.tick() => node = node.tick()?,
 
+                // 如果接收到来自集群的其他节点的消息，交给raft节点处理
                 Some(msg) = tcp_rx.next() => node = node.step(msg)?,
 
+                // 如果收到来自本地节点的消息，即有操作通过本地Node对象向集群发送消息
                 Some(msg) = node_rx.next() => {
                     match msg {
+                        // 发送给集群
                         Message{to: Address::Peer(_), ..} => tcp_tx.send(msg)?,
+                        // 发送给集群
                         Message{to: Address::Peers, ..} => tcp_tx.send(msg)?,
+                        // 发送给客户端的响应结果
                         Message{to: Address::Client, event: Event::ClientResponse{ id, response }, ..} => {
+                            // 从requests中获取到目标客户端的响应通道，并往该通道发送
                             if let Some(response_tx) = requests.remove(&id) {
                                 response_tx
                                     .send(response)
@@ -102,9 +122,13 @@ impl Server {
                     }
                 }
 
+                // 收到来自SQL引擎的消息,该消息包括请求以及响应队列
                 Some((request, response_tx)) = client_rx.next() => {
+                    // 给该消息生成一个全局唯一的uuid
                     let id = Uuid::new_v4().as_bytes().to_vec();
+                    // 记录该的响应队列
                     requests.insert(id.clone(), response_tx);
+                    // 交给raft节点执行该消息
                     node = node.step(Message{
                         from: Address::Client,
                         to: Address::Local,
@@ -117,14 +141,17 @@ impl Server {
     }
 
     /// Receives inbound messages from peers via TCP.
+    /// 通过TCP等待来自集群的消息
     async fn tcp_receive(
-        listener: TcpListener,
-        in_tx: mpsc::UnboundedSender<Message>,
+        listener: TcpListener,                 // raft监听地址
+        in_tx: mpsc::UnboundedSender<Message>, // 消息发送端
     ) -> Result<()> {
         let mut listener = TcpListenerStream::new(listener);
+        // 收到来自集群其他节点的消息
         while let Some(socket) = listener.try_next().await? {
             let peer = socket.peer_addr()?;
             let peer_in_tx = in_tx.clone();
+            // 每来一个连接就新建一个tokio线程
             tokio::spawn(async move {
                 debug!("Raft peer {} connected", peer);
                 match Self::tcp_receive_peer(socket, peer_in_tx).await {
@@ -137,39 +164,50 @@ impl Server {
     }
 
     /// Receives inbound messages from a peer via TCP.
+    /// 通多TCP等待来自另一个节点连接的消息
     async fn tcp_receive_peer(
-        socket: TcpStream,
+        socket: TcpStream, // 连接
         in_tx: mpsc::UnboundedSender<Message>,
     ) -> Result<()> {
         let mut stream = tokio_serde::SymmetricallyFramed::<_, Message, _>::new(
             Framed::new(socket, LengthDelimitedCodec::new()),
             tokio_serde::formats::SymmetricalBincode::<Message>::default(),
         );
+        // 获取消息
         while let Some(message) = stream.try_next().await? {
+            // 发送到管道
             in_tx.send(message)?;
         }
         Ok(())
     }
 
     /// Sends outbound messages to peers via TCP.
+    /// 通过TCP向集群发送消息
     async fn tcp_send(
-        node_id: String,
-        peers: HashMap<String, String>,
+        node_id: String,                // 本地节点id
+        peers: HashMap<String, String>, // 集群信息
         out_rx: mpsc::UnboundedReceiver<Message>,
     ) -> Result<()> {
         let mut out_rx = UnboundedReceiverStream::new(out_rx);
         let mut peer_txs: HashMap<String, mpsc::Sender<Message>> = HashMap::new();
 
+        // 遍历集群信息
         for (id, addr) in peers.into_iter() {
+            // 队列中最多积攒1000条
             let (tx, rx) = mpsc::channel::<Message>(1000);
+            // 将每个节点的id以及发送消费者对象关联,后面就可以根据集群中某个节点id得到对应的生产者
             peer_txs.insert(id, tx);
+            // 给每个节点创建一个发送线程
             tokio::spawn(Self::tcp_send_peer(addr, rx));
         }
 
+        // 从消息队列中获取消息
         while let Some(mut message) = out_rx.next().await {
             if message.from == Address::Local {
+                // 如果消息发送者为Local，由于这个消息是要发给其他集群的，因此要将消息发送者修改为本地节点id
                 message.from = Address::Peer(node_id.clone())
             }
+            // 根据消息接收者获取接收者id集合
             let to = match &message.to {
                 Address::Peers => peer_txs.keys().cloned().collect(),
                 Address::Peer(peer) => vec![peer.to_string()],
@@ -178,6 +216,7 @@ impl Server {
                     continue;
                 }
             };
+            // 根据接收者id获取接收者对应的消费者
             for id in to {
                 match peer_txs.get_mut(&id) {
                     Some(tx) => match tx.try_send(message.clone()) {
@@ -195,11 +234,15 @@ impl Server {
     }
 
     /// Sends outbound messages to a peer, continuously reconnecting.
+    /// 等对方发送出站消息，不断重新连接
+    /// addr: 集群中某一个节点的地址
+    /// out_rx: 要发给该节点的消息通道消费者
     async fn tcp_send_peer(addr: String, out_rx: mpsc::Receiver<Message>) {
         let mut out_rx = ReceiverStream::new(out_rx);
         loop {
             match TcpStream::connect(&addr).await {
                 Ok(socket) => {
+                    // 连上某个节点
                     debug!("Connected to Raft peer {}", addr);
                     match Self::tcp_send_peer_session(socket, &mut out_rx).await {
                         Ok(()) => break,
@@ -223,6 +266,7 @@ impl Server {
             tokio_serde::formats::SymmetricalBincode::<Message>::default(),
         );
         while let Some(message) = out_rx.next().await {
+            // 一直等待生产者发出消息，如果收到，则将消息发送到对应节点上
             stream.send(message).await?;
         }
         Ok(())

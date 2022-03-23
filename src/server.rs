@@ -129,6 +129,7 @@ pub enum Response {
 /// 与sql会话耦合的客户端会话
 pub struct Session {
     engine: sql::engine::Raft,
+    // 从raft引擎中获取的session
     sql: sql::engine::Session<sql::engine::Raft>,
 }
 
