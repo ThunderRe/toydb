@@ -130,6 +130,7 @@ pub enum Response {
 pub struct Session {
     engine: sql::engine::Raft,
     // 从raft引擎中获取的session
+    // 这里
     sql: sql::engine::Session<sql::engine::Raft>,
 }
 
@@ -141,12 +142,15 @@ impl Session {
     }
 
     /// Handles a client connection.
+    /// TCP链接会话处理客户端来的消息
     async fn handle(mut self, socket: TcpStream) -> Result<()> {
         let mut stream = tokio_serde::Framed::new(
             Framed::new(socket, LengthDelimitedCodec::new()),
             tokio_serde::formats::Bincode::default(),
         );
+        // 接收客户端请求
         while let Some(request) = stream.try_next().await? {
+            // 获取响应结果
             let mut response = tokio::task::block_in_place(|| self.request(request));
             let mut rows: Box<dyn Iterator<Item = Result<Response>> + Send> =
                 Box::new(std::iter::empty());
@@ -175,6 +179,7 @@ impl Session {
     }
 
     /// Executes a request.
+    /// TCP会话执行请求
     pub fn request(&mut self, request: Request) -> Result<Response> {
         Ok(match request {
             Request::Execute(query) => Response::Execute(self.sql.execute(&query)?),

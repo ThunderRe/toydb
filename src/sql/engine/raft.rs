@@ -150,6 +150,7 @@ impl Transaction {
     }
 
     /// Executes a query
+    /// 执行一次查询
     fn query(&self, query: Query) -> Result<Vec<u8>> {
         futures::executor::block_on(self.client.query(Raft::serialize(&query)?))
     }
@@ -265,6 +266,7 @@ impl Catalog for Transaction {
 }
 
 /// The Raft state machine for the Raft-based SQL engine, using a KV SQL engine
+/// raft状态机，使用KV-sql存储引擎
 pub struct State {
     /// The underlying KV SQL engine
     engine: super::KV,
@@ -328,6 +330,7 @@ impl raft::State for State {
         }
     }
 
+    /// 在这里对sql客户端发起的命令进行解析，并调用kv存储引擎来执行
     fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
         match Raft::deserialize(&command)? {
             Query::Resume(id) => {

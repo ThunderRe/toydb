@@ -6,6 +6,7 @@ use ::log::{debug, info, warn};
 use std::collections::HashMap;
 
 // A leader serves requests and replicates the log to followers.
+// raft集群的leader
 #[derive(Debug)]
 pub struct Leader {
     /// Number of ticks since last heartbeat.
@@ -99,6 +100,7 @@ impl RoleNode<Leader> {
     }
 
     /// Processes a message.
+    /// Leader处理一条消息
     pub fn step(mut self, msg: Message) -> Result<Node> {
         if let Err(err) = self.validate(&msg) {
             warn!("Ignoring invalid message: {}", err);
@@ -143,7 +145,9 @@ impl RoleNode<Leader> {
                 }
             }
 
+            // 来自客户端的查询请求
             Event::ClientRequest { id, request: Request::Query(command) } => {
+                // 当执行一条sql命令的时候，会将该命令保存在状态机驱动的queries集合中
                 self.state_tx.send(Instruction::Query {
                     id,
                     address: msg.from,
@@ -152,12 +156,14 @@ impl RoleNode<Leader> {
                     index: self.log.commit_index,
                     quorum: self.quorum(),
                 })?;
+                // 发起针对上面这条命令的投票
                 self.state_tx.send(Instruction::Vote {
                     term: self.term,
                     index: self.log.commit_index,
                     address: Address::Local,
                 })?;
                 if !self.peers.is_empty() {
+                    // 如果位于集群模式，需要通过心跳将这条执行记录的提交日志和term发送给其他节点进行同步
                     self.send(
                         Address::Peers,
                         Event::Heartbeat {

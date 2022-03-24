@@ -37,7 +37,7 @@ impl Client {
     }
 
     ///  Queries the Raft state machine. More than this
-    ///
+    /// 在raft客户端执行一次查询
     /// Query a raft command
     pub async fn query(&self, command: Vec<u8>) -> Result<Vec<u8>> {
         match self.request(Request::Query(command)).await? {
