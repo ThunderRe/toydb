@@ -59,21 +59,27 @@ impl<T: Transaction> Projection<T> {
 impl<T: Transaction> Executor<T> for Projection<T> {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
         if let ResultSet::Query { columns, rows } = self.source.execute(txn)? {
+            // 将expressions的元组拆分
             let (expressions, labels): (Vec<Expression>, Vec<Option<String>>) =
                 self.expressions.into_iter().unzip();
+            // 迭代projection表达式
             let columns = expressions
                 .iter()
                 .enumerate()
                 .map(|(i, e)| {
                     if let Some(Some(label)) = labels.get(i) {
+                        // 如果该表达式有重命名,则创建一个新命名的列
                         Column { name: Some(label.clone()) }
                     } else if let Expression::Field(i, _) = e {
+                        // 如果表达式不存在重命名，且该表达式表示表的某一列，则完全返回对应的列,在这里就是根据下标复制
                         columns.get(*i).cloned().unwrap_or(Column { name: None })
                     } else {
+                        // 其他情况，如这是计算表达式，如1+1，则返回空，则列名为查询内容
                         Column { name: None }
                     }
                 })
                 .collect();
+            // rows数据经过表达式
             let rows = Box::new(rows.map(move |r| {
                 r.and_then(|row| {
                     expressions.iter().map(|e| e.evaluate(Some(&row))).collect::<Result<_>>()

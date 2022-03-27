@@ -19,9 +19,12 @@ impl Scan {
 
 impl<T: Transaction> Executor<T> for Scan {
     fn execute(self: Box<Self>, txn: &mut T) -> Result<ResultSet> {
+        // 根据表名获取表
         let table = txn.must_read_table(&self.table)?;
         Ok(ResultSet::Query {
+            // 从表的元数据中获取列名
             columns: table.columns.iter().map(|c| Column { name: Some(c.name.clone()) }).collect(),
+            // 根据filter过滤表的数据
             rows: Box::new(txn.scan(&table.name, self.filter)?),
         })
     }

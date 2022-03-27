@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
                 .help("Port number to connect to")
                 .takes_value(true)
                 .required(true)
-                .default_value("9605"),
+                .default_value("9601"),
         )
         .get_matches();
 

@@ -6,6 +6,7 @@ use ::log::{debug, info, warn};
 use rand::Rng as _;
 
 /// A candidate is campaigning to become a leader.
+/// 一个尝试成为leader的候选人节点
 #[derive(Debug)]
 pub struct Candidate {
     /// Ticks elapsed since election start.

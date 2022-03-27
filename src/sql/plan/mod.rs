@@ -31,7 +31,8 @@ impl Plan {
 
     /// Executes the plan, consuming it.
     pub fn execute<T: Transaction + 'static>(self, txn: &mut T) -> Result<ResultSet> {
-        <dyn Executor<T>>::build(self.0).execute(txn)
+        let result = <dyn Executor<T>>::build(self.0).execute(txn)?;
+        Ok(result)
     }
 
     /// Optimizes the plan, consuming it.

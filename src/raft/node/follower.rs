@@ -6,6 +6,7 @@ use ::log::{debug, info, warn};
 use rand::Rng as _;
 
 // A follower replicates state from a leader.
+// Follower节点
 #[derive(Debug)]
 pub struct Follower {
     /// The leader, or None if just initialized.

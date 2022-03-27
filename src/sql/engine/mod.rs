@@ -14,23 +14,29 @@ use crate::error::{Error, Result};
 use std::collections::HashSet;
 
 /// The SQL engine interface
+/// 一个sql引擎接口
 pub trait Engine: Clone {
     /// The transaction type
+    ///
     type Transaction: Transaction;
 
     /// Begins a transaction in the given mode
+    /// sql引擎根据给定的模式开始一个事务
     fn begin(&self, mode: Mode) -> Result<Self::Transaction>;
 
     /// Begins a session for executing individual statements
+    /// 开始一个会话
     fn session(&self) -> Result<Session<Self>> {
         Ok(Session { engine: self.clone(), txn: None })
     }
 
     /// Resumes an active transaction with the given ID
+    /// 恢复一个事务
     fn resume(&self, id: u64) -> Result<Self::Transaction>;
 }
 
 /// An SQL transaction
+/// 一个sql事务接口
 pub trait Transaction: Catalog {
     /// The transaction ID
     fn id(&self) -> u64;
@@ -58,6 +64,7 @@ pub trait Transaction: Catalog {
 }
 
 /// An SQL session, which handles transaction control and simplified query execution
+/// 一个sql会话,持有sql引擎和sql事务
 pub struct Session<E: Engine> {
     /// The underlying engine
     engine: E,

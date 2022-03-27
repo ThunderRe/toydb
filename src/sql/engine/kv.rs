@@ -10,6 +10,7 @@ use std::clone::Clone;
 use std::collections::HashSet;
 
 /// A SQL engine based on an underlying MVCC key/value store
+/// 一个基于MVCC的sql引擎
 pub struct KV {
     /// The underlying key/value store
     pub(super) kv: kv::MVCC,
@@ -39,6 +40,7 @@ impl KV {
     }
 }
 
+// KV还是一个sql引擎
 impl super::Engine for KV {
     type Transaction = Transaction;
 
@@ -62,6 +64,7 @@ fn deserialize<'a, V: Deserialize<'a>>(bytes: &'a [u8]) -> Result<V> {
 }
 
 /// An SQL transaction based on an MVCC key/value transaction
+/// 一个以mvcc事务为基础的sql事务
 pub struct Transaction {
     txn: kv::mvcc::Transaction,
 }
@@ -99,6 +102,7 @@ impl Transaction {
     }
 }
 
+/// 这个事务还是sql事务，即mod中定义的sql事务
 impl super::Transaction for Transaction {
     fn id(&self) -> u64 {
         self.txn.id()
@@ -132,8 +136,11 @@ impl super::Transaction for Transaction {
         )?;
 
         // Update indexes
+        // 写入完成后需要更新索引
         for (i, column) in table.columns.iter().enumerate().filter(|(_, c)| c.index) {
+            // 索引因素：表名、列名、要构建索引的值
             let mut index = self.index_load(&table.name, &column.name, &row[i])?;
+            // 将主键也加入索引
             index.insert(id.clone());
             self.index_save(&table.name, &column.name, &row[i], index)?;
         }
@@ -144,13 +151,17 @@ impl super::Transaction for Transaction {
         let table = self.must_read_table(table)?;
         for (t, cs) in self.table_references(&table.name, true)? {
             let t = self.must_read_table(&t)?;
+            // 获取所有reference要删除的table的表
             let cs = cs
                 .into_iter()
                 .map(|c| Ok((t.get_column_index(&c)?, c)))
                 .collect::<Result<Vec<_>>>()?;
+            // 扫描跟它有关联的表
             let mut scan = self.scan(&t.name, None)?;
             while let Some(row) = scan.next().transpose()? {
+                // 获取该列信息
                 for (i, c) in &cs {
+                    // 如果另一张表中有一段数据跟要删除的数据关联，则删除失败
                     if &row[*i] == id && (table.name != t.name || id != &table.get_row_key(&row)?) {
                         return Err(Error::Value(format!(
                             "Primary key {} is referenced by table {} column {}",
@@ -161,10 +172,12 @@ impl super::Transaction for Transaction {
             }
         }
 
+        // 删除索引
         let indexes: Vec<_> = table.columns.iter().enumerate().filter(|(_, c)| c.index).collect();
         if !indexes.is_empty() {
             if let Some(row) = self.read(&table.name, id)? {
                 for (i, column) in indexes {
+                    // 根据表-列-列值获取索引
                     let mut index = self.index_load(&table.name, &column.name, &row[i])?;
                     index.remove(id);
                     self.index_save(&table.name, &column.name, &row[i], index)?;
@@ -183,6 +196,7 @@ impl super::Transaction for Transaction {
 
     fn read_index(&self, table: &str, column: &str, value: &Value) -> Result<HashSet<Value>> {
         if !self.must_read_table(table)?.get_column(column)?.index {
+            // 如果该列不是索引则抛出错误
             return Err(Error::Value(format!("No index on {}.{}", table, column)));
         }
         self.index_load(table, column, value)
@@ -220,11 +234,14 @@ impl super::Transaction for Transaction {
         }
         Ok(Box::new(
             self.txn
+                // 从store中查询Index
                 .scan_prefix(
                     &Key::Index((&table.name).into(), (&column.name).into(), None).encode(),
                 )?
                 .map(|r| -> Result<(Value, HashSet<Value>)> {
+                    // 索引的id和对应的值
                     let (k, v) = r?;
+                    // 获取索引的id
                     let value = match Key::decode(&k)? {
                         Key::Index(_, _, Some(pk)) => pk.into_owned(),
                         _ => return Err(Error::Internal("Invalid index key".into())),
@@ -237,6 +254,7 @@ impl super::Transaction for Transaction {
     fn update(&mut self, table: &str, id: &Value, row: Row) -> Result<()> {
         let table = self.must_read_table(table)?;
         // If the primary key changes we do a delete and create, otherwise we replace the row
+        // 如果更新的数据主键和where中的id不一致，则删除id的字段然后创建row
         if id != &table.get_row_key(&row)? {
             self.delete(&table.name, id)?;
             self.create(&table.name, row)?;
@@ -244,11 +262,13 @@ impl super::Transaction for Transaction {
         }
 
         // Update indexes, knowing that the primary key has not changed
+        // 更新索引,已知主键未发生变化
         let indexes: Vec<_> = table.columns.iter().enumerate().filter(|(_, c)| c.index).collect();
         if !indexes.is_empty() {
             let old = self.read(&table.name, id)?.unwrap();
             for (i, column) in indexes {
                 if old[i] == row[i] {
+                    // 如果新要更新的数据中存在索引的列的值和原来的值相同，则跳过
                     continue;
                 }
                 let mut index = self.index_load(&table.name, &column.name, &old[i])?;
@@ -266,6 +286,7 @@ impl super::Transaction for Transaction {
     }
 }
 
+/// sql事务可以查看存储信息
 impl Catalog for Transaction {
     fn create_table(&mut self, table: Table) -> Result<()> {
         if self.read_table(&table.name)?.is_some() {
@@ -278,12 +299,15 @@ impl Catalog for Transaction {
     fn delete_table(&mut self, table: &str) -> Result<()> {
         let table = self.must_read_table(table)?;
         if let Some((t, cs)) = self.table_references(&table.name, false)?.first() {
+            // 只要有一张表关联了要删除的表，则删除失败
             return Err(Error::Value(format!(
                 "Table {} is referenced by table {} column {}",
                 table.name, t, cs[0]
             )));
         }
+        // 遍历这张表的所有数据,因此filter为None
         let mut scan = self.scan(&table.name, None)?;
+        // 分别删除
         while let Some(row) = scan.next().transpose()? {
             self.delete(&table.name, &table.get_row_key(&row)?)?
         }
@@ -311,10 +335,13 @@ impl Catalog for Transaction {
 /// this is ok. Uses Cows since we want to borrow when encoding but return owned when decoding.
 enum Key<'a> {
     /// A table schema key for the given table name
+    /// 记录表格元数据的key
     Table(Option<Cow<'a, str>>),
     /// A key for an index entry
+    /// 索引的key
     Index(Cow<'a, str>, Cow<'a, str>, Option<Cow<'a, Value>>),
     /// A key for a row identified by table name and row primary key
+    /// 表格内容的key,由表名、主键值组成
     Row(Cow<'a, str>, Option<Cow<'a, Value>>),
 }
 

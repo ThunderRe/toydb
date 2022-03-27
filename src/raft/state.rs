@@ -8,6 +8,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt as _;
 
 /// A Raft-managed state machine.
+/// raft管理状态机
 pub trait State: Send {
     /// Returns the last applied index from the state machine, used when initializing the driver.
     fn applied_index(&self) -> u64;
@@ -17,27 +18,36 @@ pub trait State: Send {
     fn mutate(&mut self, index: u64, command: Vec<u8>) -> Result<Vec<u8>>;
 
     /// Queries the state machine. All errors are propagated to the caller.
+    /// 查询状态机
     fn query(&self, command: Vec<u8>) -> Result<Vec<u8>>;
 }
 
 #[derive(Debug, PartialEq)]
 /// A driver instruction.
+/// 一条驱动指令,针对的是raft状态机
 pub enum Instruction {
     /// Abort all pending operations, e.g. due to leader change.
+    /// 终止所有挂起操作, 例如对leader的变更
     Abort,
     /// Apply a log entry.
+    /// 应用日志条目
     Apply { entry: Entry },
     /// Notify the given address with the result of applying the entry at the given index.
+    /// 在给定索引处应用条目的结果通知给定地址
     Notify { id: Vec<u8>, address: Address, index: u64 },
     /// Query the state machine when the given term and index has been confirmed by vote.
+    /// 当给定的term和index都通过投票确认时查询状态机
     Query { id: Vec<u8>, address: Address, command: Vec<u8>, term: u64, index: u64, quorum: u64 },
     /// Extend the given server status and return it to the given address.
+    /// 扩展给定的服务器状态并将其返回给给定的地址
     Status { id: Vec<u8>, address: Address, status: Box<Status> },
     /// Votes for queries at the given term and commit index.
+    /// 一条查询给定term和已提交索引的投票
     Vote { term: u64, index: u64, address: Address },
 }
 
 /// A driver query.
+/// 驱动查询对象
 struct Query {
     id: Vec<u8>,
     term: u64,
@@ -48,9 +58,10 @@ struct Query {
 }
 
 /// Drives a state machine, taking operations from state_rx and sending results via node_tx.
+/// 驱动状态机，从state_rx获取操作并通过node_tx发送
 pub struct Driver {
-    state_rx: UnboundedReceiverStream<Instruction>,
-    node_tx: mpsc::UnboundedSender<Message>,
+    state_rx: UnboundedReceiverStream<Instruction>, // 接收来自raft节点的消息
+    node_tx: mpsc::UnboundedSender<Message>,        // 发送给主事件循环线程的队列
     applied_index: u64,
     /// Notify clients when their mutation is applied. <index, (client, id)>
     notify: HashMap<u64, (Address, Vec<u8>)>,
@@ -60,6 +71,7 @@ pub struct Driver {
 
 impl Driver {
     /// Creates a new state machine driver.
+    /// 创建一个新的状态机驱动
     pub fn new(
         state_rx: mpsc::UnboundedReceiver<Instruction>,
         node_tx: mpsc::UnboundedSender<Message>,
@@ -74,6 +86,7 @@ impl Driver {
     }
 
     /// Drives a state machine.
+    /// 驱动状态机
     pub async fn drive(mut self, mut state: Box<dyn State>) -> Result<()> {
         debug!("Starting state machine driver");
         while let Some(instruction) = self.state_rx.next().await {
@@ -101,6 +114,7 @@ impl Driver {
     }
 
     /// Executes a state machine instruction.
+    /// 执行一条状态机指令, 命令来自raft节点
     pub async fn execute(&mut self, i: Instruction, state: &mut dyn State) -> Result<()> {
         debug!("Executing {:?}", i);
         match i {
@@ -133,6 +147,7 @@ impl Driver {
                 }
             }
 
+            // 执行一次查询
             Instruction::Query { id, address, command, index, term, quorum } => {
                 self.queries.entry(index).or_default().insert(
                     id.clone(),
@@ -149,7 +164,9 @@ impl Driver {
             }
 
             Instruction::Vote { term, index, address } => {
+                // 将地址添加到给定条件的查询记录中
                 self.query_vote(term, index, address);
+                // 执行记录
                 self.query_execute(state)?;
             }
         }
@@ -186,9 +203,11 @@ impl Driver {
     }
 
     /// Executes any queries that are ready.
+    /// 执行任何读取到的查询
     fn query_execute(&mut self, state: &mut dyn State) -> Result<()> {
         for query in self.query_ready(self.applied_index) {
             debug!("Executing query {:?}", query.command);
+            // 在这里调用raft状态机来执行查询操作，raft状态机拥有一个基于kv的sql引擎可以用来读写本地数据
             let result = state.query(query.command);
             if let Err(error @ Error::Internal(_)) = result {
                 return Err(error);
@@ -228,10 +247,13 @@ impl Driver {
     }
 
     /// Votes for queries up to and including a given commit index for a term by an address.
+    /// 查询包括给定的commit索引和term的查询记录，用于投票
     fn query_vote(&mut self, term: u64, commit_index: u64, address: Address) {
+        // 获取所有commit index小于给定commit index的记录
         for (_, queries) in self.queries.range_mut(..=commit_index) {
             for (_, query) in queries.iter_mut() {
                 if term >= query.term {
+                    // 将地址加入到查询中
                     query.votes.insert(address.clone());
                 }
             }
@@ -239,6 +261,7 @@ impl Driver {
     }
 
     /// Sends a message.
+    /// 发送给主事件的消息
     fn send(&self, to: Address, event: Event) -> Result<()> {
         let msg = Message { from: Address::Local, to, term: 0, event };
         debug!("Sending {:?}", msg);

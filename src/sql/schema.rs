@@ -7,6 +7,7 @@ use serde_derive::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 /// The catalog stores schema information
+/// 存储信息目录接口
 pub trait Catalog {
     /// Creates a new table
     fn create_table(&mut self, table: Table) -> Result<()>;
@@ -24,20 +25,24 @@ pub trait Catalog {
     }
 
     /// Returns all references to a table, as table,column pairs.
+    /// 返回所有reference了目标table的表和对应的列
     fn table_references(&self, table: &str, with_self: bool) -> Result<Vec<(String, Vec<String>)>> {
         Ok(self
             .scan_tables()?
+            // 如果with_self为false则表示不包含自身表，此时filter会过滤出所有表名和table不相等的表
             .filter(|t| with_self || t.name != table)
             .map(|t| {
                 (
                     t.name,
                     t.columns
                         .iter()
+                        // 过滤出某一列是这张表的reference的列
                         .filter(|c| c.references.as_deref() == Some(table))
                         .map(|c| c.name.clone())
                         .collect::<Vec<_>>(),
                 )
             })
+            // 如果某张表reference了table,则columns必定不为空
             .filter(|(_, cs)| !cs.is_empty())
             .collect())
     }
@@ -256,10 +261,13 @@ impl Column {
         }
 
         // Validate uniqueness constraints
+        // 如果某列在不是主键的情况下有唯一性，则需要检查这张表中的所有列中该数据是否有重复
         if self.unique && !self.primary_key && value != &Value::Null {
+            // 获取这一列位于表中的列的下标
             let index = table.get_column_index(&self.name)?;
             let mut scan = txn.scan(&table.name, None)?;
             while let Some(row) = scan.next().transpose()? {
+                // 如果行在这个下标中的数据和当前要新增的数据相等，且这行的主键不是要新增的主键(校验的行排除自身)
                 if row.get(index).unwrap_or(&Value::Null) == value
                     && &table.get_row_key(&row)? != pk
                 {

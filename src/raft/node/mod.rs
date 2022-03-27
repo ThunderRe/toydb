@@ -23,6 +23,7 @@ const ELECTION_TIMEOUT_MIN: u64 = 8 * HEARTBEAT_INTERVAL;
 const ELECTION_TIMEOUT_MAX: u64 = 15 * HEARTBEAT_INTERVAL;
 
 /// Node status
+/// raft节点状态
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Status {
     pub server: String,
@@ -44,6 +45,7 @@ pub enum Node {
 
 impl Node {
     /// Creates a new Raft node, starting as a follower, or leader if no peers.
+    /// 创建一个raft节点，开始时默认为follower，如果没有peers则为leader
     pub async fn new(
         id: &str,
         peers: Vec<String>,
@@ -59,6 +61,7 @@ impl Node {
             )));
         }
 
+        // 状态机队列
         let (state_tx, state_rx) = mpsc::unbounded_channel();
         let mut driver = Driver::new(state_rx, node_tx.clone());
         if log.commit_index > applied_index {
@@ -67,6 +70,7 @@ impl Node {
         };
         tokio::spawn(driver.drive(state));
 
+        // 默认为Follower
         let (term, voted_for) = log.load_term()?;
         let node = RoleNode {
             id: id.to_owned(),
@@ -80,6 +84,7 @@ impl Node {
             role: Follower::new(None, voted_for.as_deref()),
         };
         if node.peers.is_empty() {
+            // 集群为空，则为Leader
             info!("No peers specified, starting as leader");
             let last_index = node.log.last_index;
             Ok(node.become_role(Leader::new(vec![], last_index))?.into())
@@ -98,6 +103,7 @@ impl Node {
     }
 
     /// Processes a message.
+    /// 处理一条raft消息
     pub fn step(self, msg: Message) -> Result<Self> {
         debug!("Stepping {:?}", msg);
         match self {
@@ -136,6 +142,7 @@ impl From<RoleNode<Leader>> for Node {
 }
 
 // A Raft node with role R
+// 一个raft节点封装
 pub struct RoleNode<R> {
     id: String,
     peers: Vec<String>,

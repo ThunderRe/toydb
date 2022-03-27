@@ -21,10 +21,17 @@ impl BufferPoolManager {
 
         let mut disk_manager = DiskManager::open(dir)?;
         let mut header_page_data = [0u8; PAGE_SIZE];
-        disk_manager.read_page(0, &mut header_page_data)?;
-        let header_page = HeaderPage::new(header_page_data)?;
-
-        Ok(BufferPoolManager { disk_manager, clock_replacer, header_page })
+        match disk_manager.read_page(0, &mut header_page_data) {
+            Ok(_) => {
+                let header_page = HeaderPage::new(header_page_data)?;
+                return Ok(BufferPoolManager { disk_manager, clock_replacer, header_page });
+            }
+            _ => {
+                disk_manager.write_page(0, &header_page_data);
+                let header_page = HeaderPage::new(header_page_data)?;
+                return Ok(BufferPoolManager { disk_manager, clock_replacer, header_page });
+            }
+        };
     }
 
     /// fetch a page from buffer pool
@@ -48,9 +55,6 @@ impl BufferPoolManager {
     }
 
     pub fn create_page(&mut self, page_id: u32) -> Result<Option<Arc<Mutex<TablePage>>>> {
-        if self.disk_manager.have_page(page_id)? {
-            return Ok(None);
-        }
         let mut prev_page_id: Option<u32> = None;
         if page_id > 1 {
             prev_page_id = Some(page_id - 1);
