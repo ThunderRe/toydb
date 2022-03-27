@@ -33,7 +33,7 @@ impl Server {
         sql_store: Box<dyn kv::Store>,
     ) -> Result<Self> {
         Ok(Server {
-            // 对外入口是raft?
+            // raft服务器，包含raft节点管理以及raft服务线程、主事件循环线程的创建
             raft: raft::Server::new(
                 id,
                 peers,
@@ -127,6 +127,8 @@ pub enum Response {
 
 /// A client session coupled to a SQL session.
 /// 与sql会话耦合的客户端会话
+/// 
+/// TCP Session
 pub struct Session {
     engine: sql::engine::Raft,
     // 从raft引擎中获取的session
@@ -148,19 +150,27 @@ impl Session {
             Framed::new(socket, LengthDelimitedCodec::new()),
             tokio_serde::formats::Bincode::default(),
         );
-        // 接收客户端请求
+        // 1. 接收客户端请求
         while let Some(request) = stream.try_next().await? {
             // 获取响应结果
             let mut response = tokio::task::block_in_place(|| self.request(request));
+
+            // 创建响应结果迭代器
             let mut rows: Box<dyn Iterator<Item = Result<Response>> + Send> =
                 Box::new(std::iter::empty());
+
+            // 如果是查询的返回结果
             if let Ok(Response::Execute(ResultSet::Query { rows: ref mut resultrows, .. })) =
                 &mut response
             {
                 rows = Box::new(
+                    // 查询的行数据复制到空迭代器中
                     std::mem::replace(resultrows, Box::new(std::iter::empty()))
+                    // 每行数据用Response::Row重新包装
                         .map(|result| result.map(|row| Response::Row(Some(row))))
+                        // 在迭代器最后加入一个空行
                         .chain(std::iter::once(Ok(Response::Row(None))))
+                        // 过滤异常，如果迭代器中间出现一个异常，那么它后续的所有数据都置为None
                         .scan(false, |err_sent, response| match (&err_sent, &response) {
                             (true, _) => None,
                             (_, Err(error)) => {
@@ -169,6 +179,7 @@ impl Session {
                             }
                             _ => Some(response),
                         })
+                        // 清空None，只保留迭代器最后的一个None
                         .fuse(),
                 );
             }
@@ -180,6 +191,8 @@ impl Session {
 
     /// Executes a request.
     /// TCP会话执行请求
+    /// 
+    /// TCP Session直接访问其中的引擎和数据库会话
     pub fn request(&mut self, request: Request) -> Result<Response> {
         Ok(match request {
             Request::Execute(query) => Response::Execute(self.sql.execute(&query)?),
